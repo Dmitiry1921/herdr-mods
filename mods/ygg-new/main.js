@@ -5,7 +5,7 @@
 // props: { spaces: [id…], title, icon, color }
 
 import { View, div, svg, image } from "gpui-kit";
-import { v_flex, h_flex, Input, InputState } from "gpui-base";
+import { v_flex, h_flex, Input, InputState, Popover } from "gpui-base";
 import { spaces, machines, run, exec, theme, appHome, props, closeOverlay } from "herdr";
 import { randomBytes } from "crypto";
 import * as fs from "fs/promises";
@@ -13,22 +13,30 @@ import * as fs from "fs/promises";
 const ICONS = "mods/ygg-new/icons";
 const SIDEBAR = "mods/ygg-sidebar/icons";
 const GREEN = "#2abb7f", RED = "#f87168", GREY = "#9fadbc", BLUE = "#579dff";
+const ORANGE = "#fea362";
 const CLAUDE_MODELS = [
-  { id: "", name: "По умолчанию" },
+  { id: "", name: "По умолчанию", tip: "Как в настройках Claude" },
   { id: "fable", name: "Fable 5.2" },
   { id: "opus", name: "Opus 5.5" },
   { id: "sonnet", name: "Sonnet 5.5" },
   { id: "haiku", name: "Haiku 5.5" },
 ];
-// Общие режимы Claude и Codex: id режима herdr-chat и флаги CLI для сервера.
-const MODES = [
-  { key: "ask", name: "Спрашивать", tip: "Спрашивает перед правками и командами",
-    claude: "default", codex: "untrusted", claudeArgs: ["--permission-mode", "default"], codexArgs: ["-a", "untrusted"] },
-  { key: "auto", name: "Авто", tip: "Решает сам по каждому действию, правит в рабочей папке",
-    claude: "auto", codex: "auto", claudeArgs: ["--permission-mode", "auto"], codexArgs: ["--full-auto"] },
-  { key: "plan", name: "План", tip: "Только читает и предлагает план, без правок",
-    claude: "plan", codex: "plan", claudeArgs: ["--permission-mode", "plan"], codexArgs: ["-s", "read-only"] },
+const AGENTS = [
+  { id: "claude", name: "Claude", tip: "Claude Code от Anthropic" },
+  { id: "codex", name: "Codex", tip: "Codex от OpenAI" },
 ];
+// Общие режимы: один список для всех агентов, у каждого агента свой id режима herdr-chat (нет id — режима у агента нет).
+// Claude на сервере идёт терминалом: id режима уходит в --permission-mode.
+const MODES = [
+  { key: "ask", icon: "hand", name: "Спрашивать", tip: "Спрашивает разрешение перед правками и командами", claude: "default", codex: "untrusted" },
+  { key: "edits", icon: "file-pen", name: "Принимать правки", tip: "Правит файлы сам, перед командами спрашивает", claude: "acceptEdits" },
+  { key: "auto", icon: "shield-check", name: "Авто", tip: "Решает сам по каждому действию, спрашивает только про рискованное", claude: "auto", codex: "auto" },
+  { key: "review", icon: "user-check", name: "Авто с ревьюером", tip: "Как Авто, но на запросы разрешений отвечает агент-ревьюер", codex: "auto-review" },
+  { key: "read", icon: "eye", name: "Только чтение", tip: "Читает файлы, перед правками и командами спрашивает", codex: "read-only" },
+  { key: "plan", icon: "list-checks", name: "План", tip: "Только читает и предлагает план, без правок", claude: "plan", codex: "plan" },
+  { key: "full", icon: "shield-alert", name: "Полный доступ", tip: "Без песочницы и без вопросов: любые файлы и интернет", codex: "full", color: ORANGE },
+];
+const OLD_MODES = ["ask", "auto", "plan"]; // last.json до списков хранил номер режима
 const RUN = 'n=$(ls -d "$HOME"/.nvm/versions/node/*/bin/node 2>/dev/null | tail -1); exec "${n:-node}" "$0" "$@"';
 
 // SSH-цель машины Herdr (её host из hc machine ls); чат Codex на ней ходит в демон Codex по ssh.
@@ -51,7 +59,8 @@ export default class YggNew extends View {
     this.where = 0; // индекс пространства проекта: Mac или сервер
     this.agent = "claude";
     this.model = 0;
-    this.mode = 1;
+    this.mode = "auto";
+    this.open = null; // открытый список: mode, agent, model
     this.worktree = false;
     this.codexModels = [{ id: "", name: "По умолчанию" }];
     this.input = InputState.new({ placeholder: "Опиши задачу для агента" });
@@ -62,11 +71,11 @@ export default class YggNew extends View {
       try {
         const cache = JSON.parse(await fs.readFile(`${appHome().replace(/\/\.config\/herdr-app\/?$/, "")}/.codex/models_cache.json`, "utf8"));
         const list = (cache.models ?? cache).filter((m) => m.visibility !== "hide");
-        this.codexModels = [{ id: "", name: "По умолчанию" }, ...list.map((m) => ({ id: m.slug, name: m.display_name ?? m.slug }))];
+        this.codexModels = [{ id: "", name: "По умолчанию", tip: "Как в настройках Codex" }, ...list.map((m) => ({ id: m.slug, name: m.display_name ?? m.slug, tip: m.description ?? "" }))];
       } catch {}
       try {
         const last = JSON.parse(await fs.readFile(PREF(), "utf8"));
-        Object.assign(this, { agent: last.agent ?? this.agent, mode: last.mode ?? this.mode, worktree: last.worktree ?? false });
+        Object.assign(this, { agent: last.agent ?? this.agent, mode: (typeof last.mode === "number" ? OLD_MODES[last.mode] : last.mode) ?? this.mode, worktree: last.worktree ?? false });
         const models = this.models();
         this.model = Math.max(0, models.findIndex((m) => m.id === last.models?.[this.agent]));
         this.lastModels = last.models ?? {};
@@ -78,6 +87,14 @@ export default class YggNew extends View {
   models() { return this.agent === "claude" ? CLAUDE_MODELS : this.codexModels; }
   spaces() { return this.ids.map((id) => spaces().find((s) => s.id === id)).filter(Boolean); }
 
+  modes() { return MODES.filter((m) => m[this.agent]); }
+  modeOf() { return this.modes().find((m) => m.key === this.mode) ?? MODES.find((m) => m.key === "auto"); }
+  setAgent(id) {
+    this.agent = id;
+    this.model = Math.max(0, this.models().findIndex((m) => m.id === this.lastModels?.[id]));
+    if (!MODES.find((m) => m.key === this.mode)?.[id]) this.mode = "auto";
+  }
+
   // Чип в нижней строке: значок, подпись, клик — следующее значение.
   chip(id, icon, text, tip, onClick, t, on = false) {
     return h_flex().id(id).h(30).px(10).gap(6).items_center().rounded(8).cursor_pointer()
@@ -87,13 +104,37 @@ export default class YggNew extends View {
       .when(Boolean(icon), (el) => el.child(icon)).child(text);
   }
 
+  // Чип со списком: клик открывает список, строка — значок, название, пояснение, галка у текущего.
+  picker(id, icon, text, title, items, current, pick, t, { on = false, color = null, anchor = "bottom_left", width = 460 } = {}) {
+    const trigger = h_flex().id(id).h(30).px(10).gap(6).items_center().rounded(8).cursor_pointer()
+      .text_color(color ?? (on ? t.foreground : t.muted)).hover((s) => s.bg(t.hover).text_color(color ?? t.foreground))
+      .when(this.open === id, (el) => el.bg(t.hover))
+      .when(Boolean(icon), (el) => el.child(icon)).child(text)
+      .child(svg(`${ICONS}/chevron-down.svg`).size(12).text_color(t.dim));
+    const rows = items.map((it, i) => h_flex().id(`${id}-${i}`).px(10).py(7).gap(10).items_start().rounded(8).cursor_pointer()
+      .when(it.key === current, (el) => el.bg(t.hover)).hover((s) => s.bg(t.hover))
+      .on_click((_e, cx) => { pick(it); this.open = null; cx.notify(); })
+      .when(Boolean(it.icon), (el) => el.child(div().pt(1).child(it.icon)))
+      .child(v_flex().flex_1().min_w(0).gap(1)
+        .child(div().text_size(13).text_color(it.color ?? t.foreground).child(it.name))
+        .when(Boolean(it.tip), (el) => el.child(div().text_size(11.5).text_color(it.color ?? t.dim).opacity(it.color ? 0.85 : 1).child(it.tip))))
+      .when(it.key === current, (el) => el.child(svg(`${ICONS}/check.svg`).size(14).mt(2).text_color(it.color ?? BLUE))));
+    return Popover.new(id).anchor(anchor).open(this.open === id)
+      .on_open_change((open, cx) => { this.open = open ? id : this.open === id ? null : this.open; cx.notify(); })
+      .trigger(trigger)
+      .content(v_flex().id(`${id}-list`).w(width).max_h(320).overflow_y_scroll().p(6).gap(1).rounded(12).border_1().border_color(t.border)
+        .bg(t.popover ?? t.chrome).shadow_lg().text_color(t.foreground)
+        .child(div().px(10).pt(4).pb(4).text_size(12).text_color(t.dim).child(title))
+        .children(rows));
+  }
+
   async start(cx) {
     const text = this.input.value().trim();
     const sp = this.spaces()[this.where];
     if (!text || !sp || this.busy) return;
     this.busy = true; this.error = null; cx.notify();
     const model = this.models()[this.model]?.id ?? "";
-    const mode = MODES[this.mode];
+    const mode = this.modeOf();
     const name = text.split("\n")[0].slice(0, 60);
     const on = sp.machine ?? null;
     try {
@@ -116,9 +157,8 @@ export default class YggNew extends View {
         run("tab.new", { space: here, name, mod: "chat", props: { chat, provider: this.agent, cwd, ...(remote ? { remote } : {}) } });
         exec("sh", ["-c", RUN, `${appHome()}/mods/ygg-new/start.mjs`, chat, model, mode[this.agent], text], { timeout: 90000 }).catch(() => {});
       } else {
-        const argv = this.agent === "codex"
-          ? ["codex", ...(model ? ["-m", model] : []), ...mode.codexArgs, text]
-          : ["claude", ...(model ? ["--model", model] : []), ...mode.claudeArgs, text];
+        // Сюда доходит только Claude: Codex и на сервере открывается чатом.
+        const argv = ["claude", ...(model ? ["--model", model] : []), "--permission-mode", mode.claude, text];
         run("tab.new", { space: sp.id, name, argv: ["sh", "-c", 'cd "$0" && exec "$@"', cwd, ...argv] });
       }
       closeOverlay(props().overlay);
@@ -136,18 +176,24 @@ export default class YggNew extends View {
     const state = sp?.machine ? machines().find((m) => m.name === sp.machine)?.layout ?? "loading" : "ready";
     const srvColor = state === "ready" ? GREEN : state === "unavailable" ? RED : GREY;
     const models = this.models();
-    const mode = MODES[this.mode];
+    const mode = this.modeOf();
+    const ico = (name, color) => svg(`${ICONS}/${name}.svg`).size(15).text_color(color ?? t.muted);
     const can = Boolean(this.input.value().trim()) && !this.busy && state !== "unavailable";
     return v_flex().size_full().bg(t.popover ?? t.chrome).p(18).gap(12).text_size(13).text_color(t.foreground)
       .child(div().text_size(20).font_medium().child("Над чем поработаем?"))
       .child(v_flex().rounded(14).border_1().border_color(t.border).bg(t.background ?? t.chrome)
         .child(div().px(12).pt(10).pb(4).child(Input.new(this.input).w_full()))
         .child(h_flex().px(6).pb(6).gap(2).items_center()
-          .child(this.chip("mode", svg(`${ICONS}/shield.svg`).size(14), mode.name, `${mode.tip}. Клик — другой режим`, () => { this.mode = (this.mode + 1) % MODES.length; }, t))
+          .child(this.picker("mode", ico(mode.icon, mode.color), mode.name, `Как подтверждать действия ${AGENTS.find((a) => a.id === this.agent)?.name}?`,
+            this.modes().map((m) => ({ key: m.key, icon: ico(m.icon, m.color), name: m.name, tip: m.tip, color: m.color })), mode.key,
+            (it) => { this.mode = it.key; }, t, { color: mode.color }))
           .child(div().flex_1())
-          .child(this.chip("agent", image(`${SIDEBAR}/${this.agent}.svg`).size(14), this.agent === "claude" ? "Claude" : "Codex",
-            "Агент сессии. Клик — другой агент", () => { this.agent = this.agent === "claude" ? "codex" : "claude"; this.model = Math.max(0, this.models().findIndex((m) => m.id === this.lastModels?.[this.agent])); }, t, true))
-          .child(this.chip("model", null, models[this.model]?.name ?? "По умолчанию", "Модель. Клик — следующая", () => { this.model = (this.model + 1) % models.length; }, t, true))
+          .child(this.picker("agent", image(`${SIDEBAR}/${this.agent}.svg`).size(14), AGENTS.find((a) => a.id === this.agent)?.name ?? this.agent, "Агент",
+            AGENTS.map((a) => ({ key: a.id, icon: image(`${SIDEBAR}/${a.id}.svg`).size(16), name: a.name, tip: a.tip })), this.agent,
+            (it) => this.setAgent(it.key), t, { on: true, anchor: "bottom_right", width: 260 }))
+          .child(this.picker("model", null, models[this.model]?.name ?? "По умолчанию", "Модель",
+            models.map((m, i) => ({ key: i, name: m.name, tip: m.tip })), this.model,
+            (it) => { this.model = it.key; }, t, { on: true, anchor: "bottom_right", width: 340 }))
           .child(div().id("go").size(32).ml(4).rounded_full().flex().items_center().justify_center()
             .bg(can ? t.foreground : t.hover).cursor_pointer().tooltip(this.busy ? "Запускаю сессию" : "Клик — запустить сессию (Enter)")
             .on_click((_e, cx) => this.start(cx))
