@@ -25,6 +25,7 @@
 //   status:toggle-hidden, statuses (the +N popover), plan (opens or closes the plan strip's steps),
 //   handoff:return|show|close|cancel (the hand-off banner), conflict:go|take
 
+import { modeList } from "./modes.js";
 import { View, div } from "gpui-kit";
 import { fps_monitor } from "gpui-fps";
 import { v_flex, h_flex, Popup } from "gpui-base";
@@ -1105,11 +1106,11 @@ export default class HerdrChat extends View {
   // an agent with none (Pi) cycles the thinking level instead, as its own TUI does.
   cycleMode(cx) {
     const s = this.store.state;
-    const modes = this.caps()?.permissionModes ?? [];
+    const modes = modeList(this.caps()?.permissionModes ?? []);
     if (!modes.length) return this.cycleEffort(cx);
     const i = modes.findIndex((m) => m.id === s.permissionMode);
     const next = modes[(i + 1) % modes.length];
-    this.flash(`Mode: ${next.label}`, cx);
+    this.flash(`Режим: ${next.name}`, cx);
     this.fire("set_permission_mode", { mode: next.id }, cx);
   }
 
@@ -1204,9 +1205,9 @@ export default class HerdrChat extends View {
   // Permission modes (capabilities.permissionModes): Ask, Accept edits, Plan… as the agent names them.
   openModePicker(cx) {
     const s = this.store.state;
-    const items = (s.capabilities?.permissionModes ?? []).map((m) => ({ value: m.id, label: m.label, detail: m.description ?? "", current: m.id === s.permissionMode }));
+    const items = modeList(s.capabilities?.permissionModes ?? []).map((m) => ({ value: m.id, label: m.name, detail: m.tip, icon: m.icon, color: m.color, current: m.id === s.permissionMode }));
     if (!items.length) return this.flash(`${this.providerName()} has no permission modes`, cx);
-    this.openPicker(new Picker("permission", "Permission mode", items, (it, cx) => {
+    this.openPicker(new Picker("permission", `Как подтверждать действия ${this.providerName()}?`, items, (it, cx) => {
       this.closePicker(cx);
       this.fire("set_permission_mode", { mode: it.value }, cx);
     }, { hint: keyHint("mode") }), cx);
