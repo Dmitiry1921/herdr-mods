@@ -89,7 +89,7 @@
                     "content": {
                       "mod": "pane"
                     },
-                    "reveal": "always",
+                    "reveal": "hover",
                     "height": 30,
                     "position": "top"
                   },
@@ -100,7 +100,7 @@
                   },
                   "focus": {
                     "width": 1,
-                    "color": "accent"
+                    "color": "border"
                   },
                   "radius": 10,
                   "gap": 8,
