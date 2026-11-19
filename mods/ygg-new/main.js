@@ -140,6 +140,34 @@ export default class YggNew extends View {
         .children(rows));
   }
 
+  // Диктовка, как в чате (overrides/chat/composer.js): клик пишет звук ffmpeg, второй клик останавливает,
+  // whisper-cli распознаёт локально, текст встаёт в поле.
+  dictate(cx) {
+    const H = appHome().replace(/\/\.config\/herdr-app\/?$/, "");
+    const PATH = `/opt/homebrew/bin:/usr/local/bin:${H}/.local/bin:/usr/bin:/bin`;
+    const base = `/tmp/herdr-dictate-new-${(this.dictId ??= Math.random().toString(36).slice(2, 8))}`;
+    if (this.dict === "rec") {
+      this.dict = "busy";
+      exec("sh", ["-c", 'kill -INT "$(cat "$0.pid")" 2>/dev/null', base]).catch(() => {});
+      cx.notify();
+      return;
+    }
+    if (this.dict) return;
+    this.dict = "rec"; this.dictErr = null;
+    cx.notify();
+    cx.spawn(async (cx) => {
+      try {
+        await exec("sh", ["-c", `export PATH="${PATH}"; rm -f "$0.wav"; ffmpeg -hide_banner -loglevel error -f avfoundation -i ":default" -ac 1 -ar 16000 -y "$0.wav" </dev/null & echo $! > "$0.pid"; wait`, base], { timeout: 900000 });
+        const r = await exec("sh", ["-c", `export PATH="${PATH}"; [ -s "$0.wav" ] || exit 3; whisper-cli -m "${H}/.cache/whisper-cpp/ggml-large-v3-turbo.bin" -l ru -nt -np -f "$0.wav" 2>/dev/null`, base], { timeout: 180000 });
+        const text = (r.stdout ?? "").replace(/\s+/g, " ").replace(/\[[^\]]*\]/g, "").trim();
+        if (text) { const v = this.input.value(); this.input.set_value(v && !/\s$/.test(v) ? `${v} ${text}` : `${v}${text}`); this.input.focus(); }
+        else this.dictErr = "Не расслышал";
+      } catch { this.dictErr = "Нет записи: разреши Herdr микрофон в настройках macOS"; }
+      this.dict = null;
+      cx.notify();
+    });
+  }
+
   async start(cx) {
     const text = this.input.value().trim();
     const sp = this.spaces()[this.where];
@@ -206,6 +234,14 @@ export default class YggNew extends View {
           .child(this.picker("model", null, models[this.model]?.name ?? "По умолчанию", "Модель",
             models.map((m, i) => ({ key: i, name: m.name, tip: m.tip })), this.model,
             (it) => { this.model = it.key; }, t, { on: true, anchor: "bottom_right", width: 340 }))
+          .child(h_flex().id("dictate").size(32).rounded_full().items_center().justify_center().cursor_pointer()
+            .when(this.dict === "rec", (e) => e.bg(t.hover).text_color(RED).loop("opacity", { from: 0.55, to: 1, period: 1100 }))
+            .when(this.dict !== "rec", (e) => e.text_color(this.dictErr ? RED : t.muted).hover((s) => s.bg(t.hover).text_color(t.foreground)))
+            .tooltip(this.dict === "rec" ? "Идёт запись. Клик — остановить и вставить текст" : this.dict === "busy" ? "Распознаю речь" : this.dictErr ?? "Надиктовать. Клик — начать запись")
+            .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+            .on_click((_e, cx) => this.dictate(cx))
+            .child(this.dict === "busy" ? svg("mods/workspace-chrome/spinner.svg").size(14).text_color(BLUE).spin(900)
+              : svg(`${ICONS}/${this.dict === "rec" ? "square" : "mic"}.svg`).size(this.dict === "rec" ? 11 : 15)))
           .child(div().id("go").size(32).ml(4).rounded_full().flex().items_center().justify_center()
             .bg(can ? t.foreground : t.hover).cursor_pointer().tooltip(this.busy ? "Запускаю сессию" : "Клик — запустить сессию (Enter)")
             .on_click((_e, cx) => this.start(cx))
