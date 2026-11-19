@@ -4,7 +4,6 @@ import { View, div, svg, image } from "gpui-kit";
 import { h_flex } from "gpui-base";
 import { theme, run, window, keys, appHome, exec } from "herdr";
 
-const BRAND = { claude: "#D97757", codex: "#6a7dff" };
 const YELLOW = "#f5cd47";
 const NAME = { claude: "Claude", codex: "Codex" };
 const RUN = 'n=$(ls -d "$HOME"/.nvm/versions/node/*/bin/node 2>/dev/null | tail -1); exec "${n:-node}" "$0" "$@"';
@@ -44,11 +43,12 @@ export default class YggStatus extends View {
   }
 
   // Полоска: заливка — израсходовано; белая засечка — сколько ушло бы к этому моменту при ровной трате до сброса.
-  // Заливка правее засечки больше чем на 15 пунктов или от 90% — жёлтая: при таком темпе до сброса не хватит.
+  // Заливка нейтральная (агента различает цветной логотип), жёлтая — правее засечки больше чем на 15 пунктов или от 90%:
+  // при таком темпе до сброса не хватит.
   meter(kind, r, t) {
     const pace = r.resetAt && r.minutes ? Math.min(100, Math.max(0, 100 - ((r.resetAt * 1000 - Date.now()) / 60000 / r.minutes) * 100)) : null;
     const hot = r.pct >= 90 || (pace != null && r.pct - pace > 15);
-    const color = hot ? YELLOW : BRAND[kind];
+    const color = hot ? YELLOW : t.muted;
     const W = 40;
     const track = div().relative().w(W).h(4).rounded(2).bg(t.border)
       .child(div().absolute().left(0).top(0).h(4).rounded(2).w((W * Math.min(r.pct, 100)) / 100).bg(color))
