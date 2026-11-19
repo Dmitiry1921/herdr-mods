@@ -5,19 +5,43 @@
 
 import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { spaces, terminals, theme, appHome, exec } from "herdr";
+import { spaces, terminals, panes, layout, placement, shared, setShared, theme, appHome, exec } from "herdr";
 
 const ICONS = "mods/ygg-panel/icons";
 // Семантика Yggdrasil: синий — идёт работа, жёлтый — упёрлись, зелёный — добавлено.
 const BLUE = "#579dff", YELLOW = "#f5cd47", GREEN = "#2abb7f", RED = "#f87168", GREY = "#9fadbc";
 const AGENT = { claude: "Claude", codex: "Codex" };
 const RUN = 'n=$(ls -d "$HOME"/.nvm/versions/node/*/bin/node 2>/dev/null | tail -1); exec "${n:-node}" "$0" "$@"';
-const k = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : `${Math.round(n / 1000)}k`);
+const k = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e4 ? `${Math.round(n / 1000)}k` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(Math.round(n)));
+const PURPLE = "#9f8fef";
+// Разделы панели: порядок, свёрнутые и закреплённые (закреплённые видны поверх сессии, когда панель скрыта).
+const SECTIONS = { env: "Среда", context: "Контекст", limits: "Лимиты", prs: "Запросы на слияние", hooks: "Хуки Codex", connectors: "Коннекторы" };
+const PREFS = "ygg-panel.prefs";
+// shared, а не localStorage: у плавающей копии мода своё хранилище, а настройки нужны обеим.
+const EMPTY = () => ({ order: [], collapsed: {}, pinned: [], open: {} });
+const prefs = () => {
+  let v = shared(PREFS);
+  if (v == null) { try { v = JSON.parse(localStorage.getItem(PREFS) ?? "null"); } catch {} }
+  return { ...EMPTY(), ...(v ?? {}) };
+};
+const setPrefs = (fn) => { const p = prefs(); fn(p); setShared(PREFS, p); };
+const orderOf = (p) => [...p.order.filter((id) => SECTIONS[id]), ...Object.keys(SECTIONS).filter((id) => !p.order.includes(id))];
+// Категории /context Claude: подпись и цвет как в окне контекста Claude; отложенные в окно не входят.
+const CAT = {
+  "Messages": ["Сообщения", BLUE], "System tools": ["Системные инструменты", "#e2763c"], "MCP tools": ["Инструменты MCP", "#4bae8f"],
+  "MCP server instructions": ["Инструкции MCP", "#2a9d8f"], "Memory files": ["Файлы памяти", "#e0a030"], "Skills": ["Скиллы", "#b0b4ba"],
+  "System prompt": ["Системный промпт", "#9aa0a6"], "Custom agents": ["Свои агенты", PURPLE],
+  "Autocompact buffer": ["Запас автосжатия", "#5c6068"], "Free space": ["Свободно", null],
+  "MCP tools (deferred)": ["MCP, отложенные", null], "System tools (deferred)": ["Системные, отложенные", null],
+};
+const PR = { OPEN: ["git-pull-request", BLUE, "открыт"], DRAFT: ["git-pull-request-draft", GREY, "черновик"], MERGED: ["git-merge", PURPLE, "влит"], DECLINED: ["git-pull-request-closed", RED, "отклонён"], CLOSED: ["git-pull-request-closed", RED, "закрыт"] };
 
 export default class YggPanel extends View {
   init(_p, cx) {
     this.data = null;
     this.key = null;
+    // Старые настройки разделов из localStorage панели переезжают в shared один раз.
+    if (!placement?.() && shared(PREFS) == null) { try { const v = JSON.parse(localStorage.getItem(PREFS) ?? "null"); if (v) setShared(PREFS, v); } catch {} }
     this.hooks = [];
     cx.timer.every(5000, (cx) => this.fetch(cx));
     this.fetchHooks(cx);
@@ -52,20 +76,28 @@ export default class YggPanel extends View {
     const sp = spaces().find((s) => s.active);
     const tab = sp?.tabs?.find((x) => x.active);
     if (!sp || !tab) return null;
-    const term = terminals().find((x) => x.labels?.["herdr.tab"] === tab.id);
+    // Терминалы вкладки: живые раньше закончившихся, хост чата раньше прочих.
+    const mine = terminals().filter((x) => x.labels?.["herdr.tab"] === tab.id.split("/").pop() && (!sp.machine || x.address.startsWith(`${sp.machine}/`)))
+      .sort((a, b) => (b.state === "live") - (a.state === "live") || (b.labels?.["herdr-chat.role"] === "host") - (a.labels?.["herdr-chat.role"] === "host"));
+    const term = mine[0];
+    const chat = panes().find((x) => x.tab === tab.id && x.mod === "chat");
     const argv = (term?.argv ?? []).join(" ");
     const kind = term?.labels?.["ygg.kind"] ?? (/codex/.test(argv) ? "codex" : /claude/.test(argv) ? "claude" : term?.report?.app ?? "");
-    return { key: `${tab.id}|${term?.address ?? ""}`, term: term?.address ?? "", cwd: term?.cwd ?? sp.folder ?? "", kind, machine: sp.machine };
+    // Чат Codex сервера живёт во вкладке на Mac: его машина — в props чата.
+    const machine = sp.machine ?? chat?.props?.remote ?? "";
+    const host = mine.find((x) => x.labels?.["herdr-chat.role"] === "host" && x.state === "live") ?? (chat?.props?.chat ? terminals().find((x) => x.labels?.["herdr-chat.chat"] === chat.props.chat) : null);
+    return { key: `${tab.id}|${term?.address ?? ""}|${host?.address ?? ""}`, term: (host ?? term)?.address ?? "", cwd: chat?.props?.cwd ?? term?.cwd ?? sp.folder ?? "",
+      kind, machine, sid: term?.labels?.["ygg.parked"] ?? "" };
   }
 
   fetch(cx) {
     const a = this.active();
-    if (!a || a.machine) { if (this.data) { this.data = null; cx.notify(); } return; }
+    if (!a) { if (this.data) { this.data = null; cx.notify(); } return; }
     if (this.busy) return;
     this.busy = true;
     cx.spawn(async (cx) => {
       try {
-        const r = await exec("sh", ["-c", RUN, `${appHome()}/mods/ygg-panel/collect.mjs`, a.term, a.cwd, a.kind], { timeout: 8000 });
+        const r = await exec("sh", ["-c", RUN, `${appHome()}/mods/ygg-panel/collect.mjs`, a.term, a.cwd, a.kind, "", a.sid, a.machine], { timeout: 10000 });
         const d = JSON.parse(r.stdout || "null");
         if (JSON.stringify(d) !== JSON.stringify(this.data)) { this.data = d; cx.notify(); }
       } catch {}
@@ -123,74 +155,148 @@ export default class YggPanel extends View {
       `${c.kind === "mcp" ? "MCP-сервер" : "Плагин"} ${c.name}, ${c.on ? "включён" : "выключен в настройках агента"}`);
   }
 
+  // Заголовок раздела: шеврон и название сворачивают; при наведении — булавка и ручка перетаскивания.
+  section(id, t, right, rows, p) {
+    const collapsed = Boolean(p.collapsed[id]), pinned = p.pinned.includes(id), float = this.float;
+    const over = this.drag && this.drag !== id && this.over === id;
+    const head = h_flex().id(`h-${id}`).h(30).px(10).pt(6).flex_none().items_center().gap(4).text_size(12).text_color(t.muted)
+      .on_hover((h, cx) => { this.hot = h ? id : this.hot === id ? null : this.hot; cx.notify(); })
+      .on_mouse_move((_e, cx) => { if (this.drag && this.over !== id) { this.over = id; cx.notify(); } })
+      .on_mouse_up("left", (_e, cx) => {
+        if (this.drag && this.drag !== id) { const from = this.drag; setPrefs((q) => { const o = orderOf(q).filter((x) => x !== from); o.splice(o.indexOf(id), 0, from); q.order = o; }); }
+        this.drag = null; this.over = null; cx.notify();
+      })
+      .child(h_flex().id(`t-${id}`).gap(4).items_center().cursor_pointer().flex_1().min_w(0)
+        .on_click((_e, cx) => { setPrefs((q) => { q.collapsed[id] = !collapsed; }); cx.notify(); })
+        .child(svg(`${ICONS}/${collapsed ? "chevron-right" : "chevron-down"}.svg`).size(12).text_color(t.dim))
+        .child(div().truncate().child(SECTIONS[id])))
+      .when(right != null, (el) => el.child(div().text_color(t.dim).child(right)))
+      .when(!float && (this.hot === id || pinned), (el) => el.child(h_flex().id(`pin-${id}`).size(20).items_center().justify_center().rounded(4).cursor_pointer()
+        .hover((s) => s.bg(t.hover)).tooltip(pinned ? "Закреплено поверх сессии" : "Закрепить поверх сессии")
+        .on_click((_e, cx) => { setPrefs((q) => { q.pinned = pinned ? q.pinned.filter((x) => x !== id) : [...q.pinned, id]; }); cx.notify(); })
+        .child(svg(`${ICONS}/pin.svg`).size(12).text_color(pinned ? BLUE : t.dim))))
+      .when(!float && this.hot === id, (el) => el.child(h_flex().id(`grip-${id}`).size(20).items_center().justify_center().rounded(4).cursor_pointer()
+        .tooltip("Перетащить раздел").on_mouse_down("left", (_e, cx) => { this.drag = id; this.over = id; cx.notify(); })
+        .child(svg(`${ICONS}/grip-vertical.svg`).size(12).text_color(t.dim))));
+    return v_flex().flex_none().relative().when(this.drag === id, (el) => el.opacity(0.5))
+      .when(over, (el) => el.child(div().absolute().left(0).right(0).top(0).h(2).bg(BLUE)))
+      .child(head).when(!collapsed, (el) => el.children(rows.filter(Boolean)).child(div().h(6)));
+  }
+
+  envRows(d, t) {
+    const r = d.repo, rows = [];
+    rows.push(this.row(svg(`${ICONS}/${d.machine ? "server" : "laptop"}.svg`).size(15).text_color(t.muted), d.machine ? `Сервер ${d.machine}` : "Этот компьютер", null, t));
+    if (r) {
+      rows.push(this.row(svg(`${ICONS}/folder.svg`).size(15).text_color(t.muted),
+        h_flex().gap(6).min_w(0).child(div().truncate().child(r.folder)).child(div().text_color(t.dim).truncate().child(r.parent ?? "")), null, t, d.cwd));
+      if (r.branch) rows.push(this.row(svg(`${ICONS}/branch.svg`).size(15).text_color(t.muted), r.branch,
+        r.worktree ? div().text_color(t.dim).child("worktree") : null, t, r.worktree ? "Ветка в отдельном worktree" : "Ветка"));
+      if (r.files) rows.push(this.row(svg(`${ICONS}/diff.svg`).size(15).text_color(t.muted), `${r.files} файлов изменено`,
+        h_flex().gap(6).child(div().text_color(GREEN).child(`+${r.add}`)).child(div().text_color(RED).child(`−${r.del}`)), t, "Незакоммиченные изменения"));
+    }
+    return rows;
+  }
+
+  // Контекст как в окне контекста Claude: полоса по категориям, строки с долей, раскрываемые списки.
+  contextRows(d, t, p) {
+    const c = d.context, b = d.breakdown, rows = [];
+    if (!c && !b) return [this.row(null, d.machine ? "появится после первого хода" : "нет данных", null, t, d.machine ? "Codex на сервере сообщает контекст с ходом" : null)];
+    const used = b?.used ?? c.used, win = b?.window ?? c.window, pct = Math.round((used / win) * 100);
+    rows.push(this.row(null, `Использовано ${pct}%`, div().text_color(t.dim).child(`${k(used)} / ${k(win)}`), t));
+    const cats = (b?.cats ?? []).filter((x) => CAT[x.name]?.[1] || !CAT[x.name]);
+    rows.push(cats.length ? this.bar(cats.map((x) => [(x.tokens / win) * 100, CAT[x.name]?.[1] ?? GREY]), t) : this.bar([[pct, pct >= 85 ? YELLOW : BLUE]], t));
+    const line = (name, tokens, color, deferred, tip) => h_flex().h(24).px(14).gap(8).flex_none().items_center().text_color(deferred ? t.dim : t.foreground)
+      .child(div().size(9).rounded(2).flex_none().when(Boolean(color), (el) => el.bg(color)).when(!color, (el) => el.border_1().border_color(t.border)))
+      .child(div().flex_1().min_w(0).truncate().child(name))
+      .child(div().text_color(t.dim).child(k(tokens)))
+      .child(h_flex().w(46).flex_none().justify_end().text_color(t.muted).child(deferred ? "" : `${((tokens / win) * 100).toFixed(1)}%`))
+      .when(Boolean(tip), (el) => el.id(`c-${name}`).tooltip(tip));
+    for (const x of b?.cats ?? []) {
+      const [name, color] = CAT[x.name] ?? [x.name, GREY];
+      rows.push(line(name, x.tokens, color, /deferred/.test(x.name), /deferred/.test(x.name) ? "Подгружаются по запросу, в окно не входят" : null));
+    }
+    if (!b && d.agent === "claude") rows.push(this.row(null, "Разбивка считается", null, t));
+    const fold = (key, title, items, tip) => {
+      if (!items?.length) return;
+      const open = Boolean(p.open[key]);
+      rows.push(h_flex().id(`f-${key}`).h(24).px(14).gap(6).flex_none().items_center().cursor_pointer().text_color(t.muted)
+        .tooltip(tip).on_click((_e, cx) => { setPrefs((q) => { q.open[key] = !open; }); cx.notify(); })
+        .child(svg(`${ICONS}/${open ? "chevron-down" : "chevron-right"}.svg`).size(12))
+        .child(div().flex_1().child(title)).child(div().text_color(t.dim).child(String(items.length))));
+      if (open) for (const it of items) rows.push(h_flex().h(22).pl(32).pr(14).gap(8).flex_none().items_center().text_size(12)
+        .child(div().flex_1().min_w(0).truncate().child(it.name)).child(div().text_color(t.dim).child(k(it.tokens))));
+    };
+    fold("mcp", "Инструменты MCP по серверам", b?.mcp, "Сколько токенов описания инструментов у каждого MCP-сервера");
+    fold("memory", "Файлы памяти", b?.memory?.map((m) => ({ name: m.path.replace(/^\/Users\/[^/]+/, "~"), tokens: m.tokens })), "CLAUDE.md, AGENTS.md и память, которые Claude читает в начале");
+    fold("skills", "Скиллы", b?.skills, "Описания скиллов в контексте");
+    if (d.chat && !this.float) rows.push(this.row(this.compacting ? svg("mods/workspace-chrome/spinner.svg").size(15).text_color(BLUE).spin(900) : svg(`${ICONS}/fold.svg`).size(15).text_color(t.muted),
+      this.compacting ? "Сжимаю сессию" : "Сжать сессию", null, t, "Сжать контекст сессии сейчас")
+      .cursor_pointer().hover((s) => s.bg(t.hover)).rounded(6).mx(6).px(8).on_click((_e, cx) => this.compact(cx)));
+    return rows;
+  }
+
+  limitRows(d, t) {
+    const L = d.limits ?? {}, rows = [];
+    rows.push(this.agentHead("claude", L.claude?.plan, t));
+    if (L.claude?.rows?.length) for (const r of L.claude.rows) rows.push(this.limit(r, t));
+    else rows.push(this.row(null, "считается", null, t, "Лимиты Claude приходят с ходом Claude Code, раз в 15 минут"));
+    rows.push(this.agentHead("codex", L.codex?.plan, t));
+    if (L.codex?.rows?.length) for (const r of L.codex.rows) rows.push(this.limit(r, t));
+    else rows.push(this.row(null, "нет данных", null, t));
+    if (L.codex?.credits != null) rows.push(this.row(null, "Кредиты", div().text_color(t.muted).child(String(L.codex.credits)), t, "Остаток кредитов Codex"));
+    return rows;
+  }
+
+  prRows(d, t) {
+    if (!d.prs?.length) return [this.row(null, d.prs ? "моих нет" : "загружаются", null, t)];
+    return d.prs.map((x) => {
+      const [icon, color, word] = PR[x.state] ?? PR.OPEN;
+      return this.row(svg(`${ICONS}/${icon}.svg`).size(15).text_color(color), x.title, div().text_color(t.dim).child(`#${x.id}`), t, `${word}, ${x.branch ?? ""}`)
+        .cursor_pointer().hover((s) => s.bg(t.hover)).rounded(6).mx(6).px(8)
+        .on_click(() => { if (x.url) exec("open", [x.url]).catch(() => {}); });
+    });
+  }
+
+  hookRows(t) {
+    const groups = [];
+    for (const h of this.hooks) {
+      const name = h.plugin ? h.plugin.split("@")[0] : h.source.split("/").slice(-2).join("/");
+      const g = groups.find((x) => x.name === name) ?? (groups.push({ name, hooks: [], modified: false }), groups.at(-1));
+      g.hooks.push(h); g.modified ||= h.status === "modified";
+    }
+    return groups.map((g) => this.row(this.trusting === g.name ? svg("mods/workspace-chrome/spinner.svg").size(15).text_color(BLUE).spin(900) : svg(`${ICONS}/shield.svg`).size(15).text_color(YELLOW),
+      g.name, div().text_color(t.dim).child(String(g.hooks.length)), t,
+      `${g.modified ? "Плагин изменился" : "Новые хуки"}: ${g.hooks.map((h) => h.event).join(", ")} ждут одобрения. Клик — одобрить`)
+      .cursor_pointer().hover((s) => s.bg(t.hover)).rounded(6).mx(6).px(8).on_click((_e, cx) => this.trust(g, cx)));
+  }
+
   render(cx) {
     const t = theme();
+    this.float = Boolean(placement?.());
     const a = this.active();
     if (a?.key !== this.key) { this.key = a?.key; this.fetch(cx); }
-    const d = this.data;
-    const line = () => div().mt(8).h(1).flex_none().bg(t.border);
-    const body = v_flex().flex_1().min_h(0).pb(14).overflow_y_scrollbar();
-    if (!d) return v_flex().size_full().bg(t.chrome).text_size(13).text_color(t.foreground)
-      .child(this.header("Сводка", t)).child(this.row(null, a?.machine ? "Сессия на сервере" : "Нет данных", null, t));
-
-    // Сводка.
-    body.child(this.header("Сводка", t, d.agent ? image(`mods/ygg-sidebar/icons/${d.agent}.svg`).size(13) : null));
-    if (d.repo) {
-      body.child(this.row(svg(`${ICONS}/folder.svg`).size(15).text_color(t.muted), d.repo.folder,
-        d.repo.branch ? h_flex().gap(4).items_center().text_color(t.muted).child(svg(`${ICONS}/branch.svg`).size(12)).child(div().max_w(150).truncate().child(d.repo.branch)) : null,
-        t, d.cwd));
-      if (d.repo.files) body.child(this.row(svg(`${ICONS}/diff.svg`).size(15).text_color(t.muted), `${d.repo.files} файлов изменено`,
-        h_flex().gap(6).child(div().text_color(GREEN).child(`+${d.repo.add}`)).child(div().text_color(RED).child(`−${d.repo.del}`)), t,
-        "Незакоммиченные изменения относительно HEAD"));
+    const d = this.data, p = prefs();
+    // Копия поверх сессии: только закреплённые разделы и только когда правая панель скрыта.
+    if (this.float) {
+      const find = (n, id) => (n?.id === id ? n : (n?.children ?? []).map((c) => find(c, id)).find(Boolean));
+      const panel = find(layout(), "panel");
+      if (!d || !p.pinned.length || (panel && !panel.hidden)) return div();
     }
-
-    // Контекст.
-    if (d.context) {
-      const pct = Math.round((d.context.used / d.context.window) * 100);
-      body.child(line()).child(this.header("Контекст", t, div().child(`${k(d.context.used)} / ${k(d.context.window)}`)))
-        .child(this.bar([[pct, pct >= 85 ? YELLOW : BLUE]], t))
-        .child(this.row(null, `Занято ${pct}%`, null, t, "Сколько окна контекста занимает последний ход сессии"));
-      if (d.chat) body.child(this.row(this.compacting ? svg("mods/workspace-chrome/spinner.svg").size(15).text_color(BLUE).spin(900) : svg(`${ICONS}/fold.svg`).size(15).text_color(t.muted),
-        this.compacting ? "Сжимаю сессию" : "Сжать сессию", null, t, "Сжатие контекста сессии. Клик — сжать сейчас")
-        .cursor_pointer().hover((s) => s.bg(t.hover)).rounded(6).mx(6).px(8)
-        .on_click((_e, cx) => this.compact(cx)));
-    }
-
-    // Лимиты.
-    const L = d.limits ?? {};
-    body.child(line()).child(this.header("Лимиты", t));
-    body.child(this.agentHead("claude", L.claude?.plan, t));
-    if (L.claude?.rows?.length) for (const r of L.claude.rows) body.child(this.limit(r, t));
-    else body.child(this.row(null, "нет данных", null, t, "Лимиты Claude приходят из статусной строки Claude Code: её снимок ещё не подключён"));
-    body.child(this.agentHead("codex", L.codex?.plan, t));
-    if (L.codex?.rows?.length) for (const r of L.codex.rows) body.child(this.limit(r, t));
-    else body.child(this.row(null, "нет данных", null, t, "Лимиты Codex берутся из свежих файлов его сессий"));
-    if (L.codex?.credits != null) body.child(this.row(null, "Кредиты", div().text_color(t.muted).child(String(L.codex.credits)), t, "Остаток кредитов Codex"));
-
-    // Хуки Codex, ждущие одобрения: строка на плагин или файл хуков.
-    if (this.hooks.length) {
-      const groups = [];
-      for (const h of this.hooks) {
-        const name = h.plugin ? h.plugin.split("@")[0] : h.source.split("/").slice(-2).join("/");
-        const g = groups.find((x) => x.name === name) ?? (groups.push({ name, hooks: [], modified: false }), groups.at(-1));
-        g.hooks.push(h); g.modified ||= h.status === "modified";
-      }
-      body.child(line()).child(this.header("Хуки Codex", t, div().child(String(groups.length))));
-      for (const g of groups) {
-        const busy = this.trusting === g.name;
-        body.child(this.row(busy ? svg("mods/workspace-chrome/spinner.svg").size(15).text_color(BLUE).spin(900) : svg(`${ICONS}/shield.svg`).size(15).text_color(YELLOW),
-          g.name, div().text_color(t.dim).child(String(g.hooks.length)), t,
-          `${g.modified ? "Плагин изменился после обновления" : "Новые хуки"}: Codex не запускает ${g.hooks.map((h) => h.event).join(", ")}, пока их не одобрить. Клик — одобрить`)
-          .cursor_pointer().hover((s) => s.bg(t.hover)).rounded(6).mx(6).px(8)
-          .on_click((_e, cx) => this.trust(g, cx)));
-      }
-    }
-
-    // Коннекторы.
-    if (d.connectors?.length) {
-      body.child(line()).child(this.header("Коннекторы", t, div().child(String(d.connectors.filter((c) => c.on).length))));
-      for (const c of d.connectors) body.child(this.connector(c, t));
-    }
-    return v_flex().size_full().min_h(0).bg(t.chrome).text_size(13).text_color(t.foreground).child(body);
+    if (!d) return v_flex().size_full().bg(t.chrome).text_size(13).text_color(t.foreground).child(this.row(null, "Нет данных", null, t));
+    const parts = {
+      env: () => this.section("env", t, null, this.envRows(d, t), p),
+      context: () => this.section("context", t, null, this.contextRows(d, t, p), p),
+      limits: () => this.section("limits", t, null, this.limitRows(d, t), p),
+      prs: () => (d.repo?.remote ? this.section("prs", t, d.prs?.length ? String(d.prs.length) : null, this.prRows(d, t), p) : null),
+      hooks: () => (this.hooks.length ? this.section("hooks", t, String(this.hooks.length), this.hookRows(t), p) : null),
+      connectors: () => (d.connectors?.length ? this.section("connectors", t, String(d.connectors.filter((c) => c.on).length), d.connectors.map((c) => this.connector(c, t)), p) : null),
+    };
+    const ids = orderOf(p).filter((id) => !this.float || p.pinned.includes(id));
+    const list = ids.map((id) => parts[id]()).filter(Boolean);
+    const body = v_flex().pb(10).children(list.flatMap((x, i) => (i ? [div().mx(14).h(1).flex_none().bg(t.border), x] : [x])));
+    if (this.float) return body.w(300).max_h(560).overflow_y_scrollbar().text_size(13).text_color(t.foreground);
+    return v_flex().size_full().min_h(0).bg(t.chrome).text_size(13).text_color(t.foreground)
+      .on_mouse_up("left", (_e, cx) => { if (this.drag) { this.drag = null; this.over = null; cx.notify(); } })
+      .child(body.flex_1().min_h(0).overflow_y_scrollbar());
   }
 }

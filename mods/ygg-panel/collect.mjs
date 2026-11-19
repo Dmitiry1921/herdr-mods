@@ -6,9 +6,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 
-const [, , term = "", argCwd = "", argKind = "", action = ""] = process.argv;
+const [, , term = "", argCwd = "", argKind = "", action = "", argSid = "", machine = ""] = process.argv;
 const HOME = os.homedir();
 const APP = path.join(HOME, ".config/herdr-app");
 const DATA = path.join(APP, "data/ygg-panel");
@@ -29,7 +30,77 @@ const lastJSON = (lines, test) => {
   }
   return null;
 };
-const git = (cwd, args) => { try { return execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8", timeout: 3000 }).trim(); } catch { return ""; } };
+const PATHS = `${HOME}/.local/bin:/opt/homebrew/bin:/usr/local/bin:${process.env.PATH}`;
+const sh = (cmd, args, timeout = 3000) => { try { return execFileSync(cmd, args, { encoding: "utf8", timeout, stdio: ["ignore", "pipe", "ignore"], env: { ...process.env, PATH: PATHS } }).trim(); } catch { return ""; } };
+// Git папки сессии; у сессии на сервере — там же, через hc exec.
+const git = (cwd, args) => (machine ? sh("hc", ["exec", "--on", machine, "git", "-C", cwd, ...args], 6000) : sh("git", ["-C", cwd, ...args]));
+const fresh = (p, ms) => { try { return Date.now() - fs.statSync(p).mtimeMs < ms; } catch { return false; } };
+// Долгое (разбивка контекста, лимиты Claude, PR) считается отдельным процессом в кэш: панель не ждёт.
+const later = (...args) => spawn(process.execPath, [process.argv[1], ...args], { detached: true, stdio: "ignore", cwd: args[1] && fs.existsSync(args[1]) ? args[1] : HOME, env: { ...process.env, PATH: PATHS } }).unref();
+const writeJSON = (p, v) => { fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(`${p}.tmp`, JSON.stringify(v)); fs.renameSync(`${p}.tmp`, p); };
+const MD_ROWS = (text, title) => {
+  const part = text.split(/^### /m).find((x) => x.startsWith(title)) ?? "";
+  return part.split("\n").filter((l) => l.startsWith("|") && !/^\|[-\s|]+\|$/.test(l)).slice(1).map((l) => l.split("|").slice(1, -1).map((c) => c.trim()));
+};
+const NUM = (v) => { const m = String(v).replace(/[~,]/g, "").match(/([\d.]+)\s*([km]?)/i); return m ? Number(m[1]) * (m[2].toLowerCase() === "k" ? 1e3 : m[2].toLowerCase() === "m" ? 1e6 : 1) : 0; };
+
+// Фоновые задачи (запускает later).
+if (action === "bg-context") {
+  // /context Claude без вызова модели: те же категории, что в окне контекста Claude.
+  const [sid, dir, out] = [argSid, argCwd, path.join(DATA, `ctx-${argSid}.json`)];
+  const raw = sh("claude", ["-p", "/context", "--resume", sid, "--no-session-persistence", "--output-format", "json"], 60000);
+  try {
+    const text = JSON.parse(raw.slice(raw.indexOf("{"))).result ?? "";
+    const head = text.match(/\*\*Tokens:\*\*\s*([\d.]+k?)\s*\/\s*([\d.]+[km]?)/i);
+    const cats = MD_ROWS(text, "Estimated usage").map(([name, tok]) => ({ name, tokens: NUM(tok) }));
+    const mcp = {};
+    for (const [, server, tok] of MD_ROWS(text, "MCP Tools")) mcp[server] = (mcp[server] ?? 0) + NUM(tok);
+    const memory = MD_ROWS(text, "Memory Files").map(([type, p, tok]) => ({ type, path: p, tokens: NUM(tok) }));
+    const skills = MD_ROWS(text, "Skills").map(([name, source, tok]) => ({ name, source, tokens: NUM(tok) }));
+    writeJSON(out, { at: Date.now(), cwd: dir, used: head ? NUM(head[1]) : null, window: head ? NUM(head[2]) : null, cats,
+      mcp: Object.entries(mcp).map(([name, tokens]) => ({ name: name.replace(/^claude_ai_/, "").replace(/_/g, " "), tokens })).sort((a, b) => b.tokens - a.tokens),
+      memory, skills: skills.sort((a, b) => b.tokens - a.tokens) });
+  } catch {}
+  process.exit(0);
+}
+if (action === "bg-claude-limits") {
+  // Лимиты Claude: каждый ход Claude Code присылает rate_limit_event; самый дешёвый ход (Haiku, без
+  // инструментов и настроек, ~3,5k токенов) раз в 15 минут.
+  const raw = sh("claude", ["-p", "ok", "--model", "haiku", "--output-format", "stream-json", "--verbose", "--no-session-persistence", "--tools", "", "--strict-mcp-config", "--setting-sources", ""], 90000);
+  const ev = raw.split("\n").filter((l) => l.includes('"rate_limit_event"')).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean).at(-1);
+  const w = ev?.rate_limit_info?.unifiedWindows;
+  if (w) writeJSON(path.join(DATA, "claude-status.json"), { rate_limits: Object.fromEntries(Object.entries(w).map(([k, v]) => [k, { used_percentage: Math.round((v.utilization ?? 0) * 100), resets_at: v.resetsAt }])) });
+  else writeJSON(path.join(DATA, "claude-status.json.miss"), { at: Date.now() });
+  process.exit(0);
+}
+if (action === "bg-prs") {
+  // PR репозитория, где я автор: GitHub через gh, Bitbucket Server через REST с токеном пользователя.
+  const [url, out] = [argSid, path.join(DATA, `prs-${createHash("sha1").update(argCwd).digest("hex").slice(0, 12)}.json`)];
+  let list = [];
+  const gh = url.match(/github\.com[:/]([^/]+\/[^/.]+)/);
+  const bb = url.match(/^(?:ssh:\/\/git@|https:\/\/)([^/:]+)(?::\d+)?\/(?:scm\/)?([^/]+)\/([^/.]+)/);
+  try {
+    if (gh) {
+      list = JSON.parse(sh("gh", ["pr", "list", "--repo", gh[1], "--author", "@me", "--state", "all", "--limit", "8", "--json", "number,title,state,isDraft,headRefName,url"], 20000) || "[]")
+        .map((p) => ({ id: p.number, title: p.title, state: p.isDraft && p.state === "OPEN" ? "DRAFT" : p.state, branch: p.headRefName, url: p.url }));
+    } else if (bb) {
+      const env = (() => { try { return fs.readFileSync(path.join(HOME, ".config/ott/.env"), "utf8"); } catch { return ""; } })();
+      const token = process.env.BITBUCKET_TOKEN || env.match(/^BITBUCKET_TOKEN=(.+)$/m)?.[1]?.trim()
+        || sh("security", ["find-generic-password", "-a", "bitbucket", "-s", "tokens/bitbucket", "-w"]);
+      if (token) {
+        const [host, proj, repo] = [bb[1], bb[2].toUpperCase(), bb[3]];
+        const H = { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(15000) };
+        // Имя пользователя токена: Bitbucket отдаёт его в заголовке X-AUSERNAME любого ответа.
+        const me = decodeURIComponent((await fetch(`https://${host}/rest/api/1.0/dashboard/pull-requests?limit=1`, H)).headers.get("x-ausername") ?? "");
+        const j = await (await fetch(`https://${host}/rest/api/1.0/projects/${proj}/repos/${repo}/pull-requests?state=ALL&role.1=AUTHOR&username.1=${encodeURIComponent(me)}&limit=8`, H)).json();
+        list = (j.values ?? [])
+          .slice(0, 8).map((p) => ({ id: p.id, title: p.title, state: p.state === "OPEN" && p.draft ? "DRAFT" : p.state, branch: p.fromRef?.displayId, url: p.links?.self?.[0]?.href }));
+      }
+    }
+    writeJSON(out, { at: Date.now(), list });
+  } catch { writeJSON(out, { at: Date.now(), list, error: true }); }
+  process.exit(0);
+}
 
 // 1. Сессия активной вкладки.
 let agent = argKind || null, cwd = argCwd || null, sessionFile = null, chat = null;
@@ -51,7 +122,19 @@ if (!sessionFile && agent === "claude" && cwd) {
 }
 
 // 2. Git.
-const repo = cwd ? { folder: path.basename(cwd), branch: git(cwd, ["branch", "--show-current"]) } : null;
+const repo = cwd ? { folder: path.basename(cwd), parent: path.basename(path.dirname(cwd)), branch: git(cwd, ["branch", "--show-current"]) } : null;
+if (repo) {
+  const top = git(cwd, ["rev-parse", "--show-toplevel"]), common = git(cwd, ["rev-parse", "--path-format=absolute", "--git-common-dir"]);
+  repo.worktree = Boolean(top && common && path.dirname(common) !== top);
+  repo.remote = git(cwd, ["remote", "get-url", "origin"]);
+}
+// PR репозитория: из кэша, обновляется в фоне раз в 5 минут.
+let prs = null;
+if (repo?.remote) {
+  const f = path.join(DATA, `prs-${createHash("sha1").update(cwd).digest("hex").slice(0, 12)}.json`);
+  prs = readJSON(f)?.list ?? null;
+  if (!fresh(f, 300000) && !fresh(`${f}.lock`, 60000)) { writeJSON(`${f}.lock`, {}); later("", cwd, "", "bg-prs", repo.remote); }
+}
 if (repo) {
   const st = git(cwd, ["diff", "--shortstat", "HEAD"]);
   const n = (re) => Number((st.match(re) || [])[1] || 0);
@@ -94,6 +177,17 @@ else if (sessionFile && agent === "codex") {
   }
 }
 
+// Разбивка контекста Claude (кэш /context, обновляется в фоне, когда сессия сдвинулась).
+let breakdown = null;
+const sid = argSid || (agent === "claude" && sessionFile ? path.basename(sessionFile, ".jsonl") : "");
+if (agent === "claude" && sid && !machine) {
+  const f = path.join(DATA, `ctx-${sid}.json`), c = readJSON(f);
+  const moved = (() => { try { return fs.statSync(sessionFile ?? "").mtimeMs > (c?.at ?? 0); } catch { return !c; } })();
+  breakdown = c;
+  if ((!c || (moved && !fresh(f, 60000))) && !fresh(`${f}.lock`, 30000)) { writeJSON(`${f}.lock`, {}); later("", cwd ?? HOME, "", "bg-context", sid); }
+  if (c?.used && c.window && !context?.exact) context = { used: c.used, window: c.window };
+}
+
 // 4. Лимиты.
 const WD = ["вс", "пн", "вт", "ср", "чт", "пт", "сб"];
 const resetText = (sec) => {
@@ -105,7 +199,9 @@ const windowLabel = (min) => (min <= 300 ? "5 часов" : min >= 10080 ? "Не
 const limits = { claude: null, codex: null };
 
 // Claude: снимок статусной строки, пишет data/ygg-panel/statusline.sh.
-const cs = readJSON(path.join(DATA, "claude-status.json"));
+const CS = path.join(DATA, "claude-status.json");
+if (!fresh(CS, 900000) && !fresh(`${CS}.miss`, 900000) && !fresh(`${CS}.lock`, 120000)) { writeJSON(`${CS}.lock`, {}); later("", "", "", "bg-claude-limits"); }
+const cs = readJSON(CS);
 if (cs?.rate_limits) {
   const MODEL = (k) => k.replace(/^seven_day_?/, "").replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase());
   limits.claude = {
@@ -199,4 +295,4 @@ if (agent === "codex") {
 for (const c of connectors) Object.assign(c, icon(c.name));
 connectors.sort((a, b) => Number(b.on) - Number(a.on));
 
-process.stdout.write(JSON.stringify({ agent, cwd, repo, context, limits, connectors, chat: !!chat }));
+process.stdout.write(JSON.stringify({ agent, cwd, repo, prs, context, breakdown, limits, connectors, chat: !!chat, machine: machine || null }));

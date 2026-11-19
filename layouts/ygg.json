@@ -192,6 +192,17 @@
           "role": "commands"
         }
       }
+    },
+    {
+      "id": "ygg-pins",
+      "edge": "right",
+      "align": "start",
+      "content": {
+        "mod": "ygg-panel",
+        "props": {
+          "float": true
+        }
+      }
     }
   ]
 }
