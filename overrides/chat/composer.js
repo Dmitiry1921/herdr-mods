@@ -17,7 +17,8 @@
 import { div } from "gpui-kit";
 import { v_flex, h_flex, TextareaState, Textarea } from "gpui-base";
 import { alpha, fileChip, icon, spinner, thumbnail } from "./util.js";
-import { exec, home } from "herdr";
+import { exec, appHome } from "herdr";
+import * as fs from "fs/promises";
 import { follow } from "./menus.js";
 import { keyHint } from "./shortcuts.js";
 
@@ -175,30 +176,34 @@ export class Composer {
     this.menu = null;
   }
 
-  // ygg: диктовка. Клик по микрофону пишет звук (ffmpeg, микрофон Mac), второй клик останавливает,
-  // whisper-cli распознаёт локально (модель large-v3-turbo в ~/.cache/whisper-cpp), текст встаёт в поле.
-  // ponytail: текст появляется после остановки, не по ходу речи; whisper-stream, если понадобится живой текст.
+  // ygg: диктовка с текстом по ходу речи. Скрипт мода ygg-new (dictate.mjs: ffmpeg + whisper-server, локально)
+  // пишет растущий текст в <base>.txt, поле раз в четверть секунды показывает его после набранного до записи.
+  // Второй клик останавливает запись, последний проход уточняет текст.
   dictate(cx) {
-    const H = home();
-    const PATH = `/opt/homebrew/bin:/usr/local/bin:${H}/.local/bin:/usr/bin:/bin`;
     const base = `/tmp/herdr-dictate-${(this.dictId ??= Math.random().toString(36).slice(2, 8))}`;
     if (this.dict === "rec") {
       this.dict = "busy";
-      exec("sh", ["-c", 'kill -INT "$(cat "$0.pid")" 2>/dev/null', base]).catch(() => {});
+      fs.writeFile(`${base}.stop`, "1").catch(() => {});
       cx.notify();
       return;
     }
     if (this.dict) return;
+    const pre = this.value;
+    const glue = (text) => (pre && text && !/\s$/.test(pre) ? `${pre} ${text}` : `${pre}${text}`);
+    let shown = "";
+    const show = async (cx) => {
+      const text = await fs.readFile(`${base}.txt`, "utf8").catch(() => "");
+      if (text !== shown) { shown = text; this.set(glue(text)); cx.notify(); }
+    };
     this.dict = "rec"; this.dictErr = null;
     cx.notify();
+    const RUN = 'n=$(ls -d "$HOME"/.nvm/versions/node/*/bin/node 2>/dev/null | tail -1); exec "${n:-node}" "$0" "$@"';
+    const tick = cx.timer.every(250, (cx) => { cx.spawn(show); });
     cx.spawn(async (cx) => {
-      try {
-        await exec("sh", ["-c", `export PATH="${PATH}"; rm -f "$0.wav"; ffmpeg -hide_banner -loglevel error -f avfoundation -i ":default" -ac 1 -ar 16000 -y "$0.wav" </dev/null & echo $! > "$0.pid"; wait`, base], { timeout: 900000 });
-        const r = await exec("sh", ["-c", `export PATH="${PATH}"; [ -s "$0.wav" ] || exit 3; whisper-cli -m "${H}/.cache/whisper-cpp/ggml-large-v3-turbo.bin" -l ru -nt -np -f "$0.wav" 2>/dev/null`, base], { timeout: 180000 });
-        const text = (r.stdout ?? "").replace(/\s+/g, " ").replace(/\[[^\]]*\]/g, "").trim();
-        if (text) { const v = this.value; this.set(v && !/\s$/.test(v) ? `${v} ${text}` : `${v}${text}`); }
-        else this.dictErr = "Не расслышал";
-      } catch { this.dictErr = "Нет записи: разреши Herdr микрофон в настройках macOS"; }
+      await exec("sh", ["-c", RUN, `${appHome()}/mods/ygg-new/dictate.mjs`, base], { timeout: 16 * 60000 }).catch(() => {});
+      tick.cancel();
+      await show(cx);
+      this.dictErr = await fs.readFile(`${base}.err`, "utf8").catch(() => null);
       this.dict = null;
       cx.notify();
     });

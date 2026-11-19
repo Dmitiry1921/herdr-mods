@@ -140,30 +140,34 @@ export default class YggNew extends View {
         .children(rows));
   }
 
-  // Диктовка, как в чате (overrides/chat/composer.js): клик пишет звук ffmpeg, второй клик останавливает,
-  // whisper-cli распознаёт локально, текст встаёт в поле.
+  // Диктовка с текстом по ходу речи: dictate.mjs (ffmpeg + whisper-server) пишет растущий текст в <base>.txt,
+  // мод раз в четверть секунды ставит его в поле после того, что было набрано до записи. Второй клик — стоп.
   dictate(cx) {
-    const H = appHome().replace(/\/\.config\/herdr-app\/?$/, "");
-    const PATH = `/opt/homebrew/bin:/usr/local/bin:${H}/.local/bin:/usr/bin:/bin`;
     const base = `/tmp/herdr-dictate-new-${(this.dictId ??= Math.random().toString(36).slice(2, 8))}`;
     if (this.dict === "rec") {
       this.dict = "busy";
-      exec("sh", ["-c", 'kill -INT "$(cat "$0.pid")" 2>/dev/null', base]).catch(() => {});
+      fs.writeFile(`${base}.stop`, "1").catch(() => {});
       cx.notify();
       return;
     }
     if (this.dict) return;
+    const pre = this.input.value();
+    const glue = (text) => (pre && text && !/\s$/.test(pre) ? `${pre} ${text}` : `${pre}${text}`);
+    let shown = "";
+    const show = async (cx) => {
+      const text = await fs.readFile(`${base}.txt`, "utf8").catch(() => "");
+      if (text !== shown) { shown = text; this.input.set_value(glue(text)); cx.notify(); }
+    };
     this.dict = "rec"; this.dictErr = null;
     cx.notify();
+    const tick = cx.timer.every(250, (cx) => { cx.spawn(show); });
     cx.spawn(async (cx) => {
-      try {
-        await exec("sh", ["-c", `export PATH="${PATH}"; rm -f "$0.wav"; ffmpeg -hide_banner -loglevel error -f avfoundation -i ":default" -ac 1 -ar 16000 -y "$0.wav" </dev/null & echo $! > "$0.pid"; wait`, base], { timeout: 900000 });
-        const r = await exec("sh", ["-c", `export PATH="${PATH}"; [ -s "$0.wav" ] || exit 3; whisper-cli -m "${H}/.cache/whisper-cpp/ggml-large-v3-turbo.bin" -l ru -nt -np -f "$0.wav" 2>/dev/null`, base], { timeout: 180000 });
-        const text = (r.stdout ?? "").replace(/\s+/g, " ").replace(/\[[^\]]*\]/g, "").trim();
-        if (text) { const v = this.input.value(); this.input.set_value(v && !/\s$/.test(v) ? `${v} ${text}` : `${v}${text}`); this.input.focus(); }
-        else this.dictErr = "Не расслышал";
-      } catch { this.dictErr = "Нет записи: разреши Herdr микрофон в настройках macOS"; }
+      await exec("sh", ["-c", RUN, `${appHome()}/mods/ygg-new/dictate.mjs`, base], { timeout: 16 * 60000 }).catch(() => {});
+      tick.cancel();
+      await show(cx);
+      this.dictErr = await fs.readFile(`${base}.err`, "utf8").catch(() => null);
       this.dict = null;
+      this.input.focus();
       cx.notify();
     });
   }
