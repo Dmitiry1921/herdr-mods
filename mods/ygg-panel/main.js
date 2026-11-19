@@ -5,10 +5,12 @@
 
 import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { spaces, terminals, panes, props, shared, setShared, theme, appHome, exec } from "herdr";
+import { spaces, terminals, panes, props, shared, setShared, theme, appHome, exec, layout, run } from "herdr";
 
 const ICONS = "mods/ygg-panel/icons";
 // Семантика Yggdrasil: синий — идёт работа, жёлтый — упёрлись, зелёный — добавлено.
+// Цвета брендов: лимиты Claude оранжевые, Codex синие, как их логотипы.
+const BRAND = { claude: "#D97757", codex: "#6a7dff" };
 const BLUE = "#579dff", YELLOW = "#f5cd47", GREEN = "#2abb7f", RED = "#f87168", GREY = "#9fadbc";
 const AGENT = { claude: "Claude", codex: "Codex" };
 const RUN = 'n=$(ls -d "$HOME"/.nvm/versions/node/*/bin/node 2>/dev/null | tail -1); exec "${n:-node}" "$0" "$@"';
@@ -84,8 +86,10 @@ export default class YggPanel extends View {
     const argv = (term?.argv ?? []).join(" ");
     const kind = term?.labels?.["ygg.kind"] ?? (/codex/.test(argv) ? "codex" : /claude/.test(argv) ? "claude" : term?.report?.app ?? "");
     // Чат Codex сервера живёт во вкладке на Mac: его машина — в props чата.
-    const machine = sp.machine ?? chat?.props?.remote ?? "";
     const host = mine.find((x) => x.labels?.["herdr-chat.role"] === "host" && x.state === "live") ?? (chat?.props?.chat ? terminals().find((x) => x.labels?.["herdr-chat.chat"] === chat.props.chat) : null);
+    // Хост чата сервера запущен с --remote <машина>, даже если в props чата её нет.
+    const hargv = host?.argv ?? [], ri = hargv.indexOf("--remote");
+    const machine = sp.machine ?? chat?.props?.remote ?? (ri >= 0 ? hargv[ri + 1] : "") ?? "";
     return { key: `${tab.id}|${term?.address ?? ""}|${host?.address ?? ""}`, term: (host ?? term)?.address ?? "", cwd: chat?.props?.cwd ?? term?.cwd ?? sp.folder ?? "",
       kind, machine, sid: term?.labels?.["ygg.parked"] ?? "" };
   }
@@ -133,8 +137,8 @@ export default class YggPanel extends View {
       .children(parts.map(([pct, color]) => div().h_full().rounded_full().w(`${Math.max(0, Math.min(100, pct))}%`).bg(color)));
   }
 
-  limit(r, t) {
-    const color = r.pct >= 90 ? YELLOW : BLUE;
+  limit(r, t, brand) {
+    const color = r.pct >= 90 ? YELLOW : brand;
     return v_flex().pt(6).pb(4).flex_none()
       .child(h_flex().px(14).gap(8).items_center()
         .child(div().flex_1().min_w(0).truncate().child(r.label))
@@ -200,11 +204,19 @@ export default class YggPanel extends View {
   // Контекст как в окне контекста Claude: полоса по категориям, строки с долей, раскрываемые списки.
   contextRows(d, t, p) {
     const c = d.context, b = d.breakdown, rows = [];
-    if (!c && !b) return [this.row(null, d.machine ? "появится после первого хода" : "нет данных", null, t, d.machine ? "Codex на сервере сообщает контекст с ходом" : null)];
+    if (!c && !b) return [this.row(null, "нет данных", null, t)];
     const used = b?.used ?? c.used, win = b?.window ?? c.window, pct = Math.round((used / win) * 100);
     rows.push(this.row(null, `Использовано ${pct}%`, div().text_color(t.dim).child(`${k(used)} / ${k(win)}`), t));
+    // Codex не делит контекст по категориям: последний ход по токен-счётчику (кэш, новый ввод, ответ, рассуждения).
+    const cx5 = c?.codex, codexCats = cx5 ? [
+      ["Ввод из кэша", cx5.cached, GREY, "Повторно прочитанный контекст, дешевле нового"],
+      ["Новый ввод", cx5.input - cx5.cached, BRAND.codex, "Ввод, который модель прочла впервые"],
+      ["Ответ", cx5.output - cx5.reasoning, GREEN, "Текст ответа и вызовы инструментов"],
+      ["Рассуждения", cx5.reasoning, PURPLE, "Скрытые рассуждения модели"],
+    ].filter((x) => x[1] > 0) : [];
     const cats = (b?.cats ?? []).filter((x) => CAT[x.name]?.[1] || !CAT[x.name]);
-    rows.push(cats.length ? this.bar(cats.map((x) => [(x.tokens / win) * 100, CAT[x.name]?.[1] ?? GREY]), t) : this.bar([[pct, pct >= 85 ? YELLOW : BLUE]], t));
+    rows.push(cats.length ? this.bar(cats.map((x) => [(x.tokens / win) * 100, CAT[x.name]?.[1] ?? GREY]), t)
+      : codexCats.length ? this.bar(codexCats.map((x) => [(x[1] / win) * 100, x[2]]), t) : this.bar([[pct, pct >= 85 ? YELLOW : BLUE]], t));
     const line = (name, tokens, color, deferred, tip) => h_flex().h(24).px(14).gap(8).flex_none().items_center().text_color(deferred ? t.dim : t.foreground)
       .child(div().size(9).rounded(2).flex_none().when(Boolean(color), (el) => el.bg(color)).when(!color, (el) => el.border_1().border_color(t.border)))
       .child(div().flex_1().min_w(0).truncate().child(name))
@@ -215,6 +227,8 @@ export default class YggPanel extends View {
       const [name, color] = CAT[x.name] ?? [x.name, GREY];
       rows.push(line(name, x.tokens, color, /deferred/.test(x.name), /deferred/.test(x.name) ? "Подгружаются по запросу, в окно не входят" : null));
     }
+    for (const [name, tokens, color, tip] of codexCats) rows.push(line(name, tokens, color, false, tip));
+    if (cx5?.session) rows.push(this.row(null, "За всю сессию", div().text_color(t.dim).child(k(cx5.session)), t, "Сколько токенов сессия прошла за все ходы, с повторами контекста"));
     if (!b && d.agent === "claude") rows.push(this.row(null, "Разбивка считается", null, t));
     const fold = (key, title, items, tip) => {
       if (!items?.length) return;
@@ -238,10 +252,10 @@ export default class YggPanel extends View {
   limitRows(d, t) {
     const L = d.limits ?? {}, rows = [];
     rows.push(this.agentHead("claude", L.claude?.plan, t));
-    if (L.claude?.rows?.length) for (const r of L.claude.rows) rows.push(this.limit(r, t));
+    if (L.claude?.rows?.length) for (const r of L.claude.rows) rows.push(this.limit(r, t, BRAND.claude));
     else rows.push(this.row(null, "считается", null, t, "Лимиты Claude приходят с ходом Claude Code, раз в 15 минут"));
     rows.push(this.agentHead("codex", L.codex?.plan, t));
-    if (L.codex?.rows?.length) for (const r of L.codex.rows) rows.push(this.limit(r, t));
+    if (L.codex?.rows?.length) for (const r of L.codex.rows) rows.push(this.limit(r, t, BRAND.codex));
     else rows.push(this.row(null, "нет данных", null, t));
     if (L.codex?.credits != null) rows.push(this.row(null, "Кредиты", div().text_color(t.muted).child(String(L.codex.credits)), t, "Остаток кредитов Codex"));
     return rows;
@@ -270,6 +284,18 @@ export default class YggPanel extends View {
       .cursor_pointer().hover((s) => s.bg(t.hover)).rounded(6).mx(6).px(8).on_click((_e, cx) => this.trust(g, cx)));
   }
 
+  // Колонка закреплённого видна, только когда есть закреплённое и правая панель скрыта.
+  // Сверяют обе копии и верхняя полоса: кто перерисовался, тот и поправит.
+  syncPins(p) {
+    const root = layout(), find = (n, id) => (n?.id === id ? n : (n?.children ?? []).reduce((f, c) => f ?? find(c, id), null));
+    const pins = find(root, "pins"), panel = find(root, "panel");
+    if (!pins) return;
+    const want = p.pinned.length > 0 && Boolean(panel?.hidden);
+    if (Boolean(pins.hidden) !== want || Date.now() - (this.pinsAt ?? 0) < 400) return;
+    this.pinsAt = Date.now();
+    run(want ? "layout.show" : "layout.hide", { id: "pins" });
+  }
+
   render(cx) {
     const t = theme();
     // Копия в колонке «pins» рядом с чатом: закреплённые разделы карточками, как в Codex.
@@ -278,6 +304,7 @@ export default class YggPanel extends View {
     const a = this.active();
     if (a?.key !== this.key) { this.key = a?.key; this.fetch(cx); }
     const d = this.data, p = prefs();
+    this.syncPins(p);
     if (this.float && (!d || !p.pinned.length)) return div();
     if (!d) return v_flex().size_full().bg(t.chrome).text_size(13).text_color(t.foreground).child(this.row(null, "Нет данных", null, t));
     const parts = {

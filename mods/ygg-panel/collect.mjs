@@ -163,11 +163,21 @@ if (action === "compact") { const r = await host({ op: "compact" }); process.std
 let context = null;
 const usage = (await host(null))?.usage;
 if (usage?.contextTokens && usage.contextWindow) context = { used: usage.contextTokens, window: usage.contextWindow, exact: true };
-else if (sessionFile && agent === "codex") {
-  const e = lastJSON(tail(sessionFile, 4e6), (l) => l.includes('"token_count"') && l.includes('"last_token_usage"'));
-  const info = e?.payload?.info;
-  if (info) context = { used: info.last_token_usage.total_tokens, window: info.model_context_window };
-} else if (sessionFile && agent === "claude") {
+if ((sessionFile || (machine && argSid)) && agent === "codex") {
+  // Последний счётчик токенов из файла сессии; у Codex на сервере файл там же, читаем через hc exec
+  // (Codex мог перенести файл: берём самый свежий с тем же id треда).
+  const id = path.basename(sessionFile ?? "").match(/([0-9a-f-]{36})\.jsonl$/)?.[1] ?? argSid;
+  const raw = machine && id
+    ? sh("hc", ["exec", "--on", machine, "sh", "-c", `f=$(ls -t "$HOME"/.codex/sessions/*/*/*/rollout-*-${id}.jsonl 2>/dev/null | head -n 1); [ -n "$f" ] && grep '"last_token_usage"' "$f" | tail -n 1`], 6000)
+    : "";
+  const e = machine ? (() => { try { return JSON.parse(raw); } catch { return null; } })()
+    : lastJSON(tail(sessionFile, 4e6), (l) => l.includes('"token_count"') && l.includes('"last_token_usage"'));
+  const info = e?.payload?.info, l = info?.last_token_usage;
+  if (l) {
+    const codex = { cached: l.cached_input_tokens || 0, input: l.input_tokens || 0, output: l.output_tokens || 0, reasoning: l.reasoning_output_tokens || 0, session: info.total_token_usage?.total_tokens || 0 };
+    context = context ? { ...context, codex } : { used: l.total_tokens, window: info.model_context_window, codex };
+  }
+} else if (!context && sessionFile && agent === "claude") {
   const e = lastJSON(tail(sessionFile, 4e6), (l) => l.includes('"usage"') && l.includes('"assistant"'));
   const u = e?.message?.usage;
   if (u) {

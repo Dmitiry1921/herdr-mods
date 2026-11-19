@@ -133,8 +133,7 @@ export default class Tabs extends View {
     this.syncPanel(space, panel, body, enabled);
     // ygg: колонка закреплённых разделов сводки рядом с чатом, когда правая панель скрыта.
     const pins = find(root, "pins"), wantPins = Boolean(shared("ygg-panel.prefs")?.pinned?.length) && Boolean(panel?.hidden);
-    if (pins && pins.hidden === wantPins && this.pinsSent !== wantPins) { this.pinsSent = wantPins; run(wantPins ? "layout.show" : "layout.hide", { id: "pins" }); }
-    else if (pins && pins.hidden !== wantPins) this.pinsSent = null;
+    if (pins && Boolean(pins.hidden) === wantPins && Date.now() - (this.pinsAt ?? 0) > 400) { this.pinsAt = Date.now(); run(wantPins ? "layout.show" : "layout.hide", { id: "pins" }); }
     // ygg: значки без подписей, как в Codex; подсказка «что это» и «Клик — …».
     const TIPS = { summary: "Сводка: контекст, лимиты, коннекторы", files: "Файлы проекта", changes: "Изменения в git" };
     const panelButton = (id, label, icon) => {
