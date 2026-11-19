@@ -112,6 +112,62 @@ if (action === "bg-prs") {
   process.exit(0);
 }
 
+// 4. Лимиты. Строки несут key (5h, W), длину окна в минутах и время сброса: по ним нижняя строка считает темп.
+const WD = ["вс", "пн", "вт", "ср", "чт", "пт", "сб"];
+const resetText = (sec) => {
+  if (!sec) return "";
+  const d = new Date(sec * 1000), hm = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  return d - Date.now() < 864e5 ? `сброс ${hm}` : `${WD[d.getDay()]} ${hm}`;
+};
+const windowLabel = (min) => (min <= 300 ? "5 часов" : min >= 10080 ? "Неделя" : `${Math.round(min / 60)} ч`);
+
+function readLimits() {
+  const limits = { claude: null, codex: null };
+  // Claude: снимок статусной строки, пишет data/ygg-panel/statusline.sh.
+  const CS = path.join(DATA, "claude-status.json");
+  if (!fresh(CS, 900000) && !fresh(`${CS}.miss`, 900000) && !fresh(`${CS}.lock`, 120000)) { writeJSON(`${CS}.lock`, {}); later("", "", "", "bg-claude-limits"); }
+  const cs = readJSON(CS);
+  if (cs?.rate_limits) {
+    const MODEL = (k) => k.replace(/^seven_day_?/, "").replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase());
+    limits.claude = {
+      plan: cs.plan || "",
+      at: fs.statSync(path.join(DATA, "claude-status.json")).mtimeMs,
+      rows: Object.entries(cs.rate_limits).filter(([, w]) => w && typeof w === "object").map(([k, w]) => {
+        const pct = w.used_percentage ?? w.utilization ?? w.used_percent ?? 0;
+        const reset = w.resets_at ? (typeof w.resets_at === "number" ? w.resets_at : Date.parse(w.resets_at) / 1000) : 0;
+        const label = k === "five_hour" ? "5 часов" : k === "seven_day" ? "Неделя · все модели" : k.startsWith("seven_day") ? `Неделя · ${MODEL(k)}` : k;
+        return { label, key: k === "five_hour" ? "5h" : "W", main: k === "five_hour" || k === "seven_day", minutes: k === "five_hour" ? 300 : 10080, resetAt: reset,
+          pct: reset && reset * 1000 < Date.now() ? 0 : Math.round(pct), reset: resetText(reset) };
+      }),
+    };
+  }
+
+  // Codex: последнее событие token_count с rate_limits в свежих rollout-файлах.
+  try {
+    const root = path.join(HOME, ".codex/sessions");
+    const files = execFileSync("find", [root, "-name", "rollout-*.jsonl", "-mtime", "-8"], { encoding: "utf8" })
+      .split("\n").filter(Boolean).map((f) => ({ f, t: fs.statSync(f).mtimeMs })).sort((a, b) => b.t - a.t).slice(0, 15);
+    let best = null;
+    for (const { f } of files) {
+      const e = lastJSON(tail(f, 2e6), (l) => l.includes('"rate_limits":{'));
+      if (e?.payload?.rate_limits && (!best || e.timestamp > best.timestamp)) best = e;
+    }
+    const rl = best?.payload?.rate_limits;
+    if (rl) {
+      const row = (w) => w && { label: windowLabel(w.window_minutes), key: w.window_minutes <= 300 ? "5h" : w.window_minutes >= 10080 ? "W" : `${Math.round(w.window_minutes / 60)}h`, main: true, minutes: w.window_minutes, resetAt: w.resets_at, pct: w.resets_at * 1000 < Date.now() ? 0 : Math.round(w.used_percent), reset: resetText(w.resets_at) };
+      limits.codex = {
+        plan: { prolite: "Pro", pro: "Pro", plus: "Plus", team: "Team", business: "Business" }[rl.plan_type] ?? rl.plan_type ?? "",
+        rows: [row(rl.primary), row(rl.secondary)].filter(Boolean),
+        credits: rl.credits?.has_credits && !rl.credits.unlimited ? Math.round(Number(rl.credits.balance)) : null,
+      };
+    }
+  } catch {}
+  return limits;
+}
+
+// Только лимиты, для нижней строки (ygg-status): без сессии, git и PR.
+if (action === "limits") { process.stdout.write(JSON.stringify(readLimits())); process.exit(0); }
+
 // 1. Сессия активной вкладки.
 let agent = argKind || null, cwd = argCwd || null, sessionFile = null, chat = null;
 const chats = path.join(APP, "data/herdr-chat/chats");
@@ -216,54 +272,7 @@ if (agent === "claude" && sid && !machine) {
   if (c?.used && c.window && !context?.exact) context = { used: c.used, window: c.window };
 }
 
-// 4. Лимиты.
-const WD = ["вс", "пн", "вт", "ср", "чт", "пт", "сб"];
-const resetText = (sec) => {
-  if (!sec) return "";
-  const d = new Date(sec * 1000), hm = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-  return d - Date.now() < 864e5 ? `сброс ${hm}` : `${WD[d.getDay()]} ${hm}`;
-};
-const windowLabel = (min) => (min <= 300 ? "5 часов" : min >= 10080 ? "Неделя" : `${Math.round(min / 60)} ч`);
-const limits = { claude: null, codex: null };
-
-// Claude: снимок статусной строки, пишет data/ygg-panel/statusline.sh.
-const CS = path.join(DATA, "claude-status.json");
-if (!fresh(CS, 900000) && !fresh(`${CS}.miss`, 900000) && !fresh(`${CS}.lock`, 120000)) { writeJSON(`${CS}.lock`, {}); later("", "", "", "bg-claude-limits"); }
-const cs = readJSON(CS);
-if (cs?.rate_limits) {
-  const MODEL = (k) => k.replace(/^seven_day_?/, "").replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase());
-  limits.claude = {
-    plan: cs.plan || "",
-    at: fs.statSync(path.join(DATA, "claude-status.json")).mtimeMs,
-    rows: Object.entries(cs.rate_limits).filter(([, w]) => w && typeof w === "object").map(([k, w]) => {
-      const pct = w.used_percentage ?? w.utilization ?? w.used_percent ?? 0;
-      const reset = w.resets_at ? (typeof w.resets_at === "number" ? w.resets_at : Date.parse(w.resets_at) / 1000) : 0;
-      const label = k === "five_hour" ? "5 часов" : k === "seven_day" ? "Неделя · все модели" : k.startsWith("seven_day") ? `Неделя · ${MODEL(k)}` : k;
-      return { label, pct: reset && reset * 1000 < Date.now() ? 0 : Math.round(pct), reset: resetText(reset) };
-    }),
-  };
-}
-
-// Codex: последнее событие token_count с rate_limits в свежих rollout-файлах.
-try {
-  const root = path.join(HOME, ".codex/sessions");
-  const files = execFileSync("find", [root, "-name", "rollout-*.jsonl", "-mtime", "-8"], { encoding: "utf8" })
-    .split("\n").filter(Boolean).map((f) => ({ f, t: fs.statSync(f).mtimeMs })).sort((a, b) => b.t - a.t).slice(0, 15);
-  let best = null;
-  for (const { f } of files) {
-    const e = lastJSON(tail(f, 2e6), (l) => l.includes('"rate_limits":{'));
-    if (e?.payload?.rate_limits && (!best || e.timestamp > best.timestamp)) best = e;
-  }
-  const rl = best?.payload?.rate_limits;
-  if (rl) {
-    const row = (w) => w && { label: windowLabel(w.window_minutes), pct: w.resets_at * 1000 < Date.now() ? 0 : Math.round(w.used_percent), reset: resetText(w.resets_at) };
-    limits.codex = {
-      plan: { prolite: "Pro", pro: "Pro", plus: "Plus", team: "Team", business: "Business" }[rl.plan_type] ?? rl.plan_type ?? "",
-      rows: [row(rl.primary), row(rl.secondary)].filter(Boolean),
-      credits: rl.credits?.has_credits && !rl.credits.unlimited ? Math.round(Number(rl.credits.balance)) : null,
-    };
-  }
-} catch {}
+const limits = readLimits();
 
 // 5. Коннекторы активного агента.
 // Значок: логотип плагина Codex, иначе бренд из Simple Icons по имени, иначе вилка.

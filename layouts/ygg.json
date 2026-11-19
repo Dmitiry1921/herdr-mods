@@ -172,7 +172,7 @@
           "id": "status",
           "type": "block",
           "content": {
-            "mod": "workspace-status"
+            "mod": "ygg-status"
           },
           "size": {
             "px": 28
