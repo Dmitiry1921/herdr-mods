@@ -1,0 +1,1 @@
+{ "place": "none", "title": "Настройки панели", "focusable": true, "overlay": { "kind": "dialog", "width": 640, "height": 560 } }

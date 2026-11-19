@@ -79,6 +79,12 @@ export default class YggSidebar extends View {
     this.order = loadJSON("ygg.order", []); // проекты
     this.sorder = loadJSON("ygg.sorder", {}); // проект -> вкладки
     this.groupOf = loadJSON("ygg.groupOf", {});
+    // Перенос старых перетаскиваний между группами из памяти мода в projects.json.
+    if (Object.keys(this.groupOf).length) {
+      const old = this.groupOf;
+      editConfig((pr) => { for (const [k, g] of Object.entries(old)) { pr[k] = { ...pr[k], group: g }; if (g === "Без группы") delete pr[k].group; } })
+        .then(() => save("ygg.groupOf", {})).catch(() => {});
+    }
     this.more = new Set(loadJSON("ygg.more", [])); // проекты, где показаны все сессии // проект, перетащенный в другую группу
     this.drag = null; // { type: "p"|"s", id, scope }
     this.over = null;
@@ -130,7 +136,12 @@ export default class YggSidebar extends View {
   }
 
   dropProject(from, to, group) {
-    if (this.groupOf[from] !== group) { this.groupOf[from] = group; save("ygg.groupOf", this.groupOf); }
+    // Группа живёт в projects.json, как и в окне настроек; groupOf остаётся до записи файла, чтобы строка не мигала.
+    const conf = this.cfg.projects?.[from] ?? {};
+    if ((conf.group ?? "Без группы") !== group) {
+      this.groupOf[from] = group;
+      editConfig((pr) => { pr[from] = { ...pr[from], group }; if (group === "Без группы") delete pr[from].group; });
+    }
     this.order = move(this.order, from, to);
     save("ygg.order", this.order);
   }
@@ -208,7 +219,7 @@ export default class YggSidebar extends View {
         done(() => editConfig((pr) => { for (const x of r.ss) if (x !== r.s) pr[x.name] = { ...pr[x.name], alias: `${r.title} · ${x.machine ?? x.name}` }; })))))
       .when(m.absent, (el) => el.child(item("forget", ico("eye-off"), "Убрать из панели", "Проект без сессий. Клик — больше не показывать (папка не трогается)",
         done(async () => { const raw = await readTextFile(KNOWN()); const k = JSON.parse(raw ?? "{}"); for (const x of r.ss) delete k[x.name]; await writeTextFile(KNOWN(), `${JSON.stringify(k, null, 2)}\n`, raw); }))))
-      .child(item("settings", ico("settings"), "Настройки панели", "Проекты, группы, иконки и число сессий. Клик — открыть настройки", done(() => exec("open", ["-t", CONFIG()]))));
+      .child(item("settings", ico("settings"), "Настройки панели", "Проекты, группы, иконки и число сессий. Клик — открыть настройки", done(() => openOverlay({ mod: "ygg-settings", kind: "dialog", width: 640, height: 560 }))));
   }
 
   // Файл или id сессии вкладки: спящая знает id, чат — путь в своём состоянии.
@@ -563,7 +574,7 @@ export default class YggSidebar extends View {
     const rows = byOrder([...byTitle].map(([title, ss]) => {
       const main = ss.find((x) => !x.machine) ?? ss[0];
       const conf = { ...ss.reduce((c, x) => ({ ...projects[x.name], ...c }), {}), ...projects[main.name] };
-      return { s: main, ss, title, conf, group: this.groupOf[main.name] ?? conf.group ?? "Без группы" };
+      return { s: main, ss, title, conf, group: conf.group ?? this.groupOf[main.name] ?? "Без группы" };
     }), this.order, (r) => r.s.name);
     for (const r of rows) if (!groups.includes(r.group)) groups.push(r.group);
     // Закреплённые проекты — первыми в своей группе.
