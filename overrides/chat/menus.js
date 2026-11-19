@@ -241,7 +241,7 @@ export class Picker {
             .child(div().pt(1).child(icon(it.icon, 14).text_color(it.color ?? t.muted)))
             .child(v_flex().flex_1().min_w(0).gap(1)
               .child(div().text_size(12.5).text_color(it.color ?? t.foreground).child(it.label))
-              .when(Boolean(it.detail), (e) => e.child(div().text_size(11.5).text_color(it.color ?? t.dim).child(it.detail))))
+              .when(Boolean(it.detail), (e) => e.child(div().text_size(10.5).line_height("14px").text_color(it.color ?? t.dim).child(it.detail))))
             .child(div().w(14).flex_none().pt(1).child(it.current ? icon("check", 14).text_color(it.color ?? t.accent) : div()));
           if (i === this.sel) rich = rich.bg(t.selected);
           return rich;

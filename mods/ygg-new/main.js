@@ -129,7 +129,7 @@ export default class YggNew extends View {
       .when(Boolean(it.icon), (el) => el.child(div().pt(1).child(it.icon)))
       .child(v_flex().flex_1().min_w(0).gap(1)
         .child(div().text_size(13).text_color(it.color ?? t.foreground).child(it.name))
-        .when(Boolean(it.tip), (el) => el.child(div().text_size(11.5).text_color(it.color ?? t.dim).opacity(it.color ? 0.85 : 1).child(it.tip))))
+        .when(Boolean(it.tip), (el) => el.child(div().text_size(10.5).line_height("14px").text_color(it.color ?? t.dim).opacity(it.color ? 0.85 : 1).child(it.tip))))
       .when(it.key === current, (el) => el.child(svg(`${ICONS}/check.svg`).size(14).mt(2).text_color(it.color ?? BLUE))));
     return Popover.new(id).anchor(anchor).open(this.open === id)
       .on_open_change((open, cx) => { this.open = open ? id : this.open === id ? null : this.open; cx.notify(); })
