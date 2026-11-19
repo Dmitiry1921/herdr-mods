@@ -254,7 +254,7 @@ export default class YggNew extends View {
           sp?.machine ?? "Этот Mac",
           sp?.machine ? `Сервер ${sp.machine} ${state === "ready" ? "доступен" : state === "unavailable" ? "недоступен" : "подключается"}. ${ss.length > 1 ? "Клик — запустить в другом месте" : "Других мест у проекта нет"}` : `Сессия на этом Mac. ${ss.length > 1 ? "Клик — запустить на сервере" : "Других мест у проекта нет"}`,
           () => { this.where = (this.where + 1) % Math.max(1, ss.length); }, t))
-        .child(this.chip("worktree", svg(`${ICONS}/branch.svg`).size(14).text_color(this.worktree ? BLUE : t.muted), this.worktree ? "Новый worktree" : "Папка проекта",
+        .child(this.chip("worktree", svg(`${ICONS}/${this.worktree ? "branch" : "folder"}.svg`).size(14).text_color(this.worktree ? BLUE : t.muted), this.worktree ? "Новый worktree" : "Папка проекта",
           this.worktree ? "Сессия в своём worktree с новой веткой. Клик — работать в папке проекта" : "Сессия в папке проекта. Клик — завести отдельный worktree", () => { this.worktree = !this.worktree; }, t, this.worktree))
         .child(div().flex_1())
         .when(Boolean(this.error), (el) => el.child(div().max_w(260).truncate().text_color(RED).tooltip(this.error).child(this.error))));
