@@ -109,6 +109,22 @@
               }
             },
             {
+              "id": "pins",
+              "type": "block",
+              "size": {
+                "px": 320
+              },
+              "min": 260,
+              "max": 480,
+              "hidden": true,
+              "content": {
+                "mod": "ygg-panel",
+                "props": {
+                  "pins": true
+                }
+              }
+            },
+            {
               "id": "panel",
               "type": "column",
               "children": [
@@ -190,17 +206,6 @@
         "mod": "new-chat",
         "props": {
           "role": "commands"
-        }
-      }
-    },
-    {
-      "id": "ygg-pins",
-      "edge": "right",
-      "align": "start",
-      "content": {
-        "mod": "ygg-panel",
-        "props": {
-          "float": true
         }
       }
     }

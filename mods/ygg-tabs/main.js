@@ -131,6 +131,10 @@ export default class Tabs extends View {
     const panel = find(root, "panel"), body = find(root, "panel-body");
     const enabled = ["summary", ...(shared("workspace.panels") ?? ["files", "changes"])];
     this.syncPanel(space, panel, body, enabled);
+    // ygg: колонка закреплённых разделов сводки рядом с чатом, когда правая панель скрыта.
+    const pins = find(root, "pins"), wantPins = Boolean(shared("ygg-panel.prefs")?.pinned?.length) && Boolean(panel?.hidden);
+    if (pins && pins.hidden === wantPins && this.pinsSent !== wantPins) { this.pinsSent = wantPins; run(wantPins ? "layout.show" : "layout.hide", { id: "pins" }); }
+    else if (pins && pins.hidden !== wantPins) this.pinsSent = null;
     // ygg: значки без подписей, как в Codex; подсказка «что это» и «Клик — …».
     const TIPS = { summary: "Сводка: контекст, лимиты, коннекторы", files: "Файлы проекта", changes: "Изменения в git" };
     const panelButton = (id, label, icon) => {

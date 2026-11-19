@@ -5,7 +5,7 @@
 
 import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { spaces, terminals, panes, layout, placement, shared, setShared, theme, appHome, exec } from "herdr";
+import { spaces, terminals, panes, props, shared, setShared, theme, appHome, exec } from "herdr";
 
 const ICONS = "mods/ygg-panel/icons";
 // Семантика Yggdrasil: синий — идёт работа, жёлтый — упёрлись, зелёный — добавлено.
@@ -41,7 +41,7 @@ export default class YggPanel extends View {
     this.data = null;
     this.key = null;
     // Старые настройки разделов из localStorage панели переезжают в shared один раз.
-    if (!placement?.() && shared(PREFS) == null) { try { const v = JSON.parse(localStorage.getItem(PREFS) ?? "null"); if (v) setShared(PREFS, v); } catch {} }
+    if (!props()?.pins && shared(PREFS) == null) { try { const v = JSON.parse(localStorage.getItem(PREFS) ?? "null"); if (v) setShared(PREFS, v); } catch {} }
     this.hooks = [];
     cx.timer.every(5000, (cx) => this.fetch(cx));
     this.fetchHooks(cx);
@@ -171,8 +171,8 @@ export default class YggPanel extends View {
         .child(svg(`${ICONS}/${collapsed ? "chevron-right" : "chevron-down"}.svg`).size(12).text_color(t.dim))
         .child(div().truncate().child(SECTIONS[id])))
       .when(right != null, (el) => el.child(div().text_color(t.dim).child(right)))
-      .when(!float && (this.hot === id || pinned), (el) => el.child(h_flex().id(`pin-${id}`).size(20).items_center().justify_center().rounded(4).cursor_pointer()
-        .hover((s) => s.bg(t.hover)).tooltip(pinned ? "Закреплено поверх сессии" : "Закрепить поверх сессии")
+      .when(float || this.hot === id || pinned, (el) => el.child(h_flex().id(`pin-${id}`).size(20).items_center().justify_center().rounded(4).cursor_pointer()
+        .hover((s) => s.bg(t.hover)).tooltip(pinned ? "Закреплено рядом с сессией. Клик — открепить" : "Закрепить рядом с сессией")
         .on_click((_e, cx) => { setPrefs((q) => { q.pinned = pinned ? q.pinned.filter((x) => x !== id) : [...q.pinned, id]; }); cx.notify(); })
         .child(svg(`${ICONS}/pin.svg`).size(12).text_color(pinned ? BLUE : t.dim))))
       .when(!float && this.hot === id, (el) => el.child(h_flex().id(`grip-${id}`).size(20).items_center().justify_center().rounded(4).cursor_pointer()
@@ -272,16 +272,13 @@ export default class YggPanel extends View {
 
   render(cx) {
     const t = theme();
-    this.float = Boolean(placement?.());
+    // Копия в колонке «pins» рядом с чатом: закреплённые разделы карточками, как в Codex.
+    // Колонку показывает и прячет верхняя полоса (ygg-tabs): видна, когда есть закреплённые и панель скрыта.
+    this.float = Boolean(props()?.pins);
     const a = this.active();
     if (a?.key !== this.key) { this.key = a?.key; this.fetch(cx); }
     const d = this.data, p = prefs();
-    // Копия поверх сессии: только закреплённые разделы и только когда правая панель скрыта.
-    if (this.float) {
-      const find = (n, id) => (n?.id === id ? n : (n?.children ?? []).map((c) => find(c, id)).find(Boolean));
-      const panel = find(layout(), "panel");
-      if (!d || !p.pinned.length || (panel && !panel.hidden)) return div();
-    }
+    if (this.float && (!d || !p.pinned.length)) return div();
     if (!d) return v_flex().size_full().bg(t.chrome).text_size(13).text_color(t.foreground).child(this.row(null, "Нет данных", null, t));
     const parts = {
       env: () => this.section("env", t, null, this.envRows(d, t), p),
@@ -293,8 +290,9 @@ export default class YggPanel extends View {
     };
     const ids = orderOf(p).filter((id) => !this.float || p.pinned.includes(id));
     const list = ids.map((id) => parts[id]()).filter(Boolean);
+    if (this.float) return v_flex().size_full().min_h(0).gap(8).overflow_y_scrollbar().text_size(13).text_color(t.foreground)
+      .children(list.map((x) => v_flex().flex_none().rounded(12).border_1().border_color(t.border).bg(t.chrome).pb(4).child(x)));
     const body = v_flex().pb(10).children(list.flatMap((x, i) => (i ? [div().mx(14).h(1).flex_none().bg(t.border), x] : [x])));
-    if (this.float) return body.w(300).max_h(560).overflow_y_scrollbar().text_size(13).text_color(t.foreground);
     return v_flex().size_full().min_h(0).bg(t.chrome).text_size(13).text_color(t.foreground)
       .on_mouse_up("left", (_e, cx) => { if (this.drag) { this.drag = null; this.over = null; cx.notify(); } })
       .child(body.flex_1().min_h(0).overflow_y_scrollbar());
