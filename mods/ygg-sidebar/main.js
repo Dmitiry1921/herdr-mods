@@ -56,7 +56,7 @@ const TIP = {
   done: "Агент закончил, ты ещё не смотрел. Клик — открыть сессию",
   idle: "Сессия открыта, агент простаивает. Клик — открыть сессию",
   parked: "Сессия спит. Клик — продолжить её чатом",
-  remote: "Сессия спит на сервере. Клик — открыть её терминал",
+  remote: "Сессия спит на сервере. Клик — продолжить её чатом",
 };
 
 // Сессия без заголовка паркуется с id треда вместо имени: показываем коротко.
@@ -380,7 +380,8 @@ export default class YggSidebar extends View {
       const argv = (t?.argv ?? []).join(" ");
       const byArgv = /\bcodex\b/.test(argv) ? "codex" : /\bclaude\b/.test(argv) ? "claude" : null;
       kind ??= AGENT[l["ygg.kind"]] ?? AGENT[l["herdr-chat.provider"]] ?? AGENT[t.report?.app] ?? AGENT[t.program?.key] ?? byArgv;
-      parked ??= l["ygg.parked"] ?? null;
+      // Codex, проснувшийся в терминале (codex resume <id>), тоже знает свой тред: по нему откроется чат.
+      parked ??= l["ygg.parked"] ?? (kind === "codex" ? argv.match(/\bresume\b.*?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/)?.[1] : null) ?? null;
       chatId ??= l["herdr-chat.chat"] ?? null;
       cwd ??= t?.cwd ?? null;
     }
@@ -391,11 +392,32 @@ export default class YggSidebar extends View {
     chatId ??= chatPane?.props?.chat ?? null;
     return { kind, status, parked: !status && parked ? parked : null, sleepId: parked, chatId, cwd, subs, chat: Boolean(chatPane) };
   }
+  // Чат Codex сервера живёт во вкладке на этом Mac: herdr-chat находит свою вкладку только в раскладке
+  // этого Mac. Вкладка встаёт в здешнее пространство того же проекта (его нет — заводится). Пространство
+  // на сервере не закрывается: последняя его вкладка остаётся, в ней только гасится терминал.
+  async remoteChat(s, tab, info) {
+    const title = (x) => this.cfg.projects?.[x]?.alias ?? x;
+    let to = spaces().find((x) => !x.machine && title(x.name) === title(s.name))?.id;
+    if (!to) {
+      const [name, k] = Object.entries(this.known).find(([n, v]) => !v.machine && title(n) === title(s.name)) ?? [];
+      const home = (await exec("sh", ["-c", "echo $HOME"])).stdout.trim();
+      [to] = await this.ensure([{ name: name ?? title(s.name), folder: k?.folder ?? home, absent: true }]);
+    }
+    if (!to) return run("tab.select", { id: tab.id });
+    await this.openChat(to, tab.name, "codex", info.cwd || s.folder, info.sleepId, s.machine);
+    if ((s.tabs?.length ?? 0) > 1) return run("tab.close", { id: tab.id });
+    const own = tab.id.split("/").pop();
+    for (const t of terminals().filter((x) => x.address.startsWith(`${s.machine}/`) && x.labels?.["herdr.tab"] === own))
+      exec("sh", ["-c", 'PATH="$HOME/.local/bin:$PATH" exec hc kill "$0"', t.address]).catch(() => {});
+  }
   open(s, tab, info) {
     if (this.popup) { setShared("ygg.popHover", false); closeOverlay(props().overlay); }
     run("space.select", { id: s.id });
-    if (info.parked && s.machine && info.kind === "codex") {
-      this.openChat(s.id, tab.name, "codex", info.cwd || s.folder, info.parked, s.machine).then(() => run("tab.close", { id: tab.id }));
+    // Codex на сервере открывается чатом и спящий, и проснувшийся в терминале, пока он не занят ходом
+    // или вопросом: терминал закрывается, тред продолжает демон Codex машины.
+    const busy = info.status === "working" || info.status === "blocked";
+    if (s.machine && info.kind === "codex" && info.sleepId && !info.chat && !busy) {
+      this.remoteChat(s, tab, info);
     } else if (info.parked && !s.machine && info.kind) {
       // herdr-chat ждёт у Claude путь к файлу сессии: по голому id он заводит новую с тем же id
       // и Claude отвечает «Session ID … is already in use». Codex без пути открывается без истории.

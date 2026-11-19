@@ -111,7 +111,9 @@ export default class YggNew extends View {
       if (!on || this.agent === "codex") {
         const chat = `c-${randomBytes(4).toString("hex")}`;
         const remote = on ? await sshTarget(on) : null;
-        run("tab.new", { space: sp.id, name, mod: "chat", props: { chat, provider: this.agent, cwd, ...(remote ? { remote } : {}) } });
+        // Вкладка чата только на этом Mac (herdr-chat ищет её в здешней раскладке): здешнее пространство проекта.
+        const here = on ? (this.spaces().find((x) => !x.machine) ?? spaces().find((x) => !x.machine) ?? sp).id : sp.id;
+        run("tab.new", { space: here, name, mod: "chat", props: { chat, provider: this.agent, cwd, ...(remote ? { remote } : {}) } });
         exec("sh", ["-c", RUN, `${appHome()}/mods/ygg-new/start.mjs`, chat, model, mode[this.agent], text], { timeout: 90000 }).catch(() => {});
       } else {
         const argv = this.agent === "codex"
