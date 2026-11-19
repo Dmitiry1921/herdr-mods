@@ -30,6 +30,18 @@ const MODES = [
     claude: "plan", codex: "plan", claudeArgs: ["--permission-mode", "plan"], codexArgs: ["-s", "read-only"] },
 ];
 const RUN = 'n=$(ls -d "$HOME"/.nvm/versions/node/*/bin/node 2>/dev/null | tail -1); exec "${n:-node}" "$0" "$@"';
+
+// SSH-цель машины Herdr (её host из hc machine ls); чат Codex на ней ходит в демон Codex по ssh.
+let TARGETS = null;
+const sshTarget = async (name) => {
+  if (!TARGETS) {
+    try {
+      const r = await exec("sh", ["-c", 'PATH="$HOME/.local/bin:$PATH" exec hc machine ls --json'], { timeout: 10000 });
+      TARGETS = Object.fromEntries((JSON.parse(r.stdout).machines ?? []).map((m) => [m.name, m.host ?? m.target ?? m.name]));
+    } catch { TARGETS = {}; }
+  }
+  return TARGETS[name] ?? name;
+};
 const PREF = () => `${appHome()}/data/ygg-new/last.json`;
 
 export default class YggNew extends View {
@@ -95,9 +107,11 @@ export default class YggNew extends View {
         if (r.code !== 0) throw new Error(r.stderr.trim().split("\n").pop());
         cwd = dir;
       }
-      if (!on) {
+      // Codex на сервере тоже чатом: хост чата здесь, ход идёт в демоне Codex на сервере и доживает, пока Mac спит.
+      if (!on || this.agent === "codex") {
         const chat = `c-${randomBytes(4).toString("hex")}`;
-        run("tab.new", { space: sp.id, name, mod: "chat", props: { chat, provider: this.agent, cwd } });
+        const remote = on ? await sshTarget(on) : null;
+        run("tab.new", { space: sp.id, name, mod: "chat", props: { chat, provider: this.agent, cwd, ...(remote ? { remote } : {}) } });
         exec("sh", ["-c", RUN, `${appHome()}/mods/ygg-new/start.mjs`, chat, model, mode[this.agent], text], { timeout: 90000 }).catch(() => {});
       } else {
         const argv = this.agent === "codex"

@@ -17,6 +17,18 @@ const KNOWN = () => `${appHome()}/data/ygg-sidebar/known.json`;
 const ARCHIVE = () => `${appHome()}/data/ygg-sidebar/archive.json`;
 const OPS = () => `${appHome()}/mods/ygg-sidebar/session-ops.mjs`;
 const RUN = 'n=$(ls -d "$HOME"/.nvm/versions/node/*/bin/node 2>/dev/null | tail -1); exec "${n:-node}" "$0" "$@"';
+
+// SSH-цель машины Herdr (её host из hc machine ls); чат Codex на ней ходит в демон Codex по ssh.
+let TARGETS = null;
+const sshTarget = async (name) => {
+  if (!TARGETS) {
+    try {
+      const r = await exec("sh", ["-c", 'PATH="$HOME/.local/bin:$PATH" exec hc machine ls --json'], { timeout: 10000 });
+      TARGETS = Object.fromEntries((JSON.parse(r.stdout).machines ?? []).map((m) => [m.name, m.host ?? m.target ?? m.name]));
+    } catch { TARGETS = {}; }
+  }
+  return TARGETS[name] ?? name;
+};
 const ops = (...args) => exec("sh", ["-c", RUN, OPS(), ...args], { timeout: 40000 }).then((r) => JSON.parse(r.stdout || "{}")).catch((e) => ({ ok: false, error: String(e) }));
 const copy = (text) => exec("sh", ["-c", 'printf %s "$0" | pbcopy', text]);
 // ponytail: временный лог кликов, убрать после разбора.
@@ -252,9 +264,11 @@ export default class YggSidebar extends View {
   }
 
   // Открыть сессию чатом во вкладке пространства (путь к файлу: у Claude по голому id заводится новая).
-  async openChat(spaceId, name, kind, cwd, session) {
-    const found = session && !session.startsWith("/") ? (await ops("find", kind, session)).path : session;
-    run("tab.new", { space: spaceId, name, mod: "chat", props: { chat: `c-${randomBytes(4).toString("hex")}`, provider: kind, cwd, session: found ?? session } });
+  async openChat(spaceId, name, kind, cwd, session, machine = null) {
+    // На сервере файл сессии не ищем: хост продолжает тред Codex по id в демоне машины.
+    const found = !machine && session && !session.startsWith("/") ? (await ops("find", kind, session)).path : session;
+    const remote = machine ? await sshTarget(machine) : null;
+    run("tab.new", { space: spaceId, name, mod: "chat", props: { chat: `c-${randomBytes(4).toString("hex")}`, provider: kind, cwd, session: found ?? session, ...(remote ? { remote } : {}) } });
   }
 
   // Меню сессии (правый клик): переименовать, закрепить, форк, перенести, скопировать, архивировать.
@@ -380,7 +394,9 @@ export default class YggSidebar extends View {
   open(s, tab, info) {
     if (this.popup) { setShared("ygg.popHover", false); closeOverlay(props().overlay); }
     run("space.select", { id: s.id });
-    if (info.parked && !s.machine && info.kind) {
+    if (info.parked && s.machine && info.kind === "codex") {
+      this.openChat(s.id, tab.name, "codex", info.cwd || s.folder, info.parked, s.machine).then(() => run("tab.close", { id: tab.id }));
+    } else if (info.parked && !s.machine && info.kind) {
       // herdr-chat ждёт у Claude путь к файлу сессии: по голому id он заводит новую с тем же id
       // и Claude отвечает «Session ID … is already in use». Codex без пути открывается без истории.
       const id = info.parked;
