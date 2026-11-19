@@ -1,6 +1,7 @@
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex, ScrollHandle } from "gpui-base";
-import { spaces, panes, terminals, run, openOverlay, theme, window, shared, layout, settings } from "herdr";
+import { spaces, panes, terminals, run, openOverlay, theme, window, shared, layout, settings, exec } from "herdr";
+import { randomBytes } from "crypto";
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -87,6 +88,41 @@ export default class Tabs extends View {
     localStorage.setItem("panels", JSON.stringify(this.panels));
   }
 
+  // Сессия агента в терминале вкладки: вид, id и файл истории (ищется один раз на id).
+  chatTarget(cur, kind) {
+    const term = terminals().find((x) => x.labels?.["herdr.tab"] === cur.id && x.state === "live" && x.labels?.["herdr-chat.role"] !== "host");
+    if (!term || !kind) return null;
+    const argv = (term.argv ?? []).join(" "), UUID = "([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})";
+    const id = term.labels?.["ygg.parked"] ?? argv.match(new RegExp(kind === "claude" ? `--(?:session-id|resume)[ =]${UUID}` : `\\bresume\\b.*?${UUID}`))?.[1];
+    if (!id) return null;
+    this.hist ??= {};
+    if (!(id in this.hist)) {
+      this.hist[id] = undefined;
+      const find = kind === "claude" ? 'ls "$HOME"/.claude/projects/*/"$0".jsonl 2>/dev/null | head -1'
+        : 'ls "$HOME"/.codex/sessions/*/*/*/rollout-*-"$0".jsonl 2>/dev/null | head -1';
+      exec("sh", ["-c", find, id]).then((r) => { this.hist[id] = r.stdout.trim() || null; }).catch(() => { this.hist[id] = null; });
+    }
+    return { kind, id, cwd: term.cwd, file: this.hist[id], busy: cur.status === "working" || cur.status === "blocked" };
+  }
+
+  chatButton(x, cur, space, t) {
+    const ok = Boolean(x.file) && !x.busy;
+    const tip = x.file === undefined ? "Ищу историю сессии"
+      : !x.file ? "Чатом не открыть: история этой сессии не сохраняется"
+      : x.busy ? "Агент занят. Переключить можно после хода"
+      : "Открыть чатом. Клик — закрыть терминал и продолжить эту сессию в чате";
+    return h_flex().id("to-chat").size(24).flex_none().items_center().justify_center().rounded(6).tooltip(tip)
+      .text_color(ok ? t.muted : t.dim).when(ok, (el) => el.hover((s) => s.bg(t.hover).text_color(t.foreground)))
+      .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+      .on_click((_e, cx) => {
+        cx.stop_propagation();
+        if (!ok) return;
+        run("tab.new", { space: space.id, name: cur.name, mod: "chat", props: { chat: `c-${randomBytes(4).toString("hex")}`, provider: x.kind, cwd: x.cwd, session: x.file } });
+        run("tab.close", { id: cur.id, confirmed: true });
+      })
+      .child(svg("mods/ygg-sidebar/icons/chat.svg").size(14));
+  }
+
   render() {
     const t = theme();
     const space = spaces().find(p => p.active);
@@ -153,12 +189,15 @@ export default class Tabs extends View {
     const term = cur && terminals().find(x => x.labels?.["herdr.tab"] === cur.id);
     const sig = `${term?.labels?.["herdr-chat.provider"] ?? ""} ${term?.labels?.["ygg.kind"] ?? ""} ${term?.report?.app ?? ""} ${lead?.program?.key ?? ""} ${(term?.argv ?? []).join(" ")}`;
     const kind = /codex/.test(sig) ? "codex" : /claude/.test(sig) ? "claude" : null;
+    // ygg: агент, запущенный в терминале, можно перевести в чат: терминал закрывается, та же сессия продолжается чатом.
+    const toChat = cur && !space?.machine && !panes().some((p) => p.tab === cur.id && p.mod === "chat") ? this.chatTarget(cur, kind) : null;
     const title = cur ? h_flex().id("ygg-title").min_w(0).gap(8).items_center().text_size(13.5).text_color(t.foreground)
       .on_mouse_down("left", (e, cx) => { cx.stop_propagation(); if (e.click_count === 2) run("tab.rename", { id: cur.id }); })
       .tooltip("Текущая сессия. Двойной клик — переименовать")
       .child(kind ? image(`mods/ygg-sidebar/icons/${kind}.svg`).size(16) : svg("icons/shell.svg").size(15).text_color(t.muted))
       .child(div().min_w(0).truncate().font_medium().child(label(cur, lead)))
-      .child(div().flex_none().text_color(t.dim).child(space?.name ?? "")) : div();
+      .child(div().flex_none().text_color(t.dim).child(space?.name ?? ""))
+      .when(Boolean(toChat), (el) => el.child(this.chatButton(toChat, cur, space, t))) : div();
     return h_flex().size_full().min_w(0).px(10).pl(lightsPadding).gap(3).items_center().bg(t.chrome).border_b(1).border_color(t.border)
       .on_mouse_up("left", () => { this.pressed = null; })
       .on_scroll_wheel(e => this.wheel(e))
