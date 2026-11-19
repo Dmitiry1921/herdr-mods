@@ -334,7 +334,9 @@ export default class YggSidebar extends View {
       }), agent))
       .child(item("copy-dir", "copy", "Скопировать путь к папке", `${cwd}. Клик — скопировать`, done(() => copy(cwd))))
       .child(line())
-      .child(item("archive", "archive", "Архивировать", "Сессия уходит из панели, вернуть её можно из меню проекта (правый клик). Клик — архивировать", done(async () => {
+      // Вкладка без агента (терминал, у которого агент завершился): архивировать нечего, на месте архива пункт «Закрыть».
+      .child(!info.kind ? item("close", "x", "Закрыть", "Терминал без агента. Клик — закрыть вкладку", done(() => run("tab.close", { id: tab.id, confirmed: true })))
+        : item("archive", "archive", "Архивировать", "Сессия уходит из панели, вернуть её можно из меню проекта (правый клик). Клик — архивировать", done(async () => {
         const id = await this.sessionOf(info);
         if (info.kind === "codex" && local && id) await ops("archive", "codex", id);
         const raw = await readTextFile(ARCHIVE()).catch(() => null);
@@ -342,7 +344,7 @@ export default class YggSidebar extends View {
         list.unshift({ name: tab.name ?? null, kind: info.kind, session: id, cwd, space: s.name, machine: s.machine ?? null, at: Date.now() });
         await writeTextFile(ARCHIVE(), `${JSON.stringify(list, null, 2)}\n`, raw ?? null);
         run("tab.close", { id: tab.id, confirmed: true });
-      }), Boolean(info.kind)));
+      })));
   }
 
   // «+» у проекта: окно новой сессии (ygg-new) с местами запуска этого проекта.
