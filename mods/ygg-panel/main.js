@@ -331,11 +331,12 @@ export default class YggPanel extends View {
     };
     const ids = orderOf(p).filter((id) => !this.float || p.pinned.includes(id));
     const list = ids.map((id) => parts[id]()).filter(Boolean);
-    if (this.float) return v_flex().size_full().min_h(0).gap(8).overflow_y_scrollbar().text_size(13).text_color(t.foreground)
+    if (this.float) return v_flex().id("ygg-pins-scroll").size_full().min_h(0).gap(8).overflow_y_scrollbar().text_size(13).text_color(t.foreground)
       .children(list.map((x) => v_flex().flex_none().rounded(12).border_1().border_color(t.border).bg(t.chrome).pb(4).child(x)));
     const body = v_flex().pb(10).children(list.flatMap((x, i) => (i ? [div().mx(14).h(1).flex_none().bg(t.border), x] : [x])));
     return v_flex().size_full().min_h(0).bg(t.chrome).text_size(13).text_color(t.foreground)
       .on_mouse_up("left", (_e, cx) => { if (this.drag) { this.drag = null; this.over = null; cx.notify(); } })
-      .child(body.flex_1().min_h(0).overflow_y_scrollbar());
+      // Постоянный id: по нему Herdr хранит прокрутку, без него она сбрасывается при каждой перерисовке.
+      .child(body.id("ygg-panel-scroll").flex_1().min_h(0).overflow_y_scrollbar());
   }
 }

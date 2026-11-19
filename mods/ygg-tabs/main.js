@@ -111,8 +111,10 @@ export default class Tabs extends View {
       : !x.file ? "Чатом не открыть: история этой сессии не сохраняется"
       : x.busy ? "Агент занят. Переключить можно после хода"
       : "Открыть чатом. Клик — закрыть терминал и продолжить эту сессию в чате";
-    return h_flex().id("to-chat").size(24).flex_none().items_center().justify_center().rounded(6).tooltip(tip)
-      .text_color(ok ? t.muted : t.dim).when(ok, (el) => el.hover((s) => s.bg(t.hover).text_color(t.foreground)))
+    // Заметная кнопка с подписью: один значок в заголовке терялся.
+    return h_flex().id("to-chat").h(24).px(8).gap(5).flex_none().items_center().rounded(6).tooltip(tip).text_size(12.5)
+      .border_1().border_color(t.border).text_color(ok ? t.foreground : t.dim).opacity(ok ? 1 : 0.6)
+      .when(ok, (el) => el.cursor_pointer().hover((s) => s.bg(t.hover)))
       .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
       .on_click((_e, cx) => {
         cx.stop_propagation();
@@ -120,7 +122,7 @@ export default class Tabs extends View {
         run("tab.new", { space: space.id, name: cur.name, mod: "chat", props: { chat: `c-${randomBytes(4).toString("hex")}`, provider: x.kind, cwd: x.cwd, session: x.file } });
         run("tab.close", { id: cur.id, confirmed: true });
       })
-      .child(svg("mods/ygg-sidebar/icons/chat.svg").size(14));
+      .child(svg("mods/ygg-sidebar/icons/chat.svg").size(13)).child("Открыть чатом");
   }
 
   render() {
