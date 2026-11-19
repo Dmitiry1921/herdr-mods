@@ -45,6 +45,16 @@ const MD_ROWS = (text, title) => {
 const NUM = (v) => { const m = String(v).replace(/[~,]/g, "").match(/([\d.]+)\s*([km]?)/i); return m ? Number(m[1]) * (m[2].toLowerCase() === "k" ? 1e3 : m[2].toLowerCase() === "m" ? 1e6 : 1) : 0; };
 
 // Фоновые задачи (запускает later).
+if (action === "bg-codex-context") {
+  // Разбивка контекста Codex (codex-context.mjs); у сессии на сервере тот же скрипт гоняется там через hc exec.
+  const [id, file] = [argSid, argCwd], out = path.join(DATA, `ctx-codex-${id}.json`);
+  const script = path.join(path.dirname(process.argv[1]), "codex-context.mjs");
+  const raw = machine
+    ? sh("hc", ["exec", "--on", machine, "sh", "-c", `f=$(ls -t "$HOME"/.codex/sessions/*/*/*/rollout-*-${id}.jsonl 2>/dev/null | head -n 1); [ -n "$f" ] && node --input-type=module -e "$0" "$f"`, fs.readFileSync(script, "utf8")], 60000)
+    : sh(process.execPath, [script, file], 60000);
+  try { writeJSON(out, JSON.parse(raw)); } catch { writeJSON(out, { at: Date.now(), error: true }); }
+  process.exit(0);
+}
 if (action === "bg-context") {
   // /context Claude без вызова модели: те же категории, что в окне контекста Claude.
   const [sid, dir, out] = [argSid, argCwd, path.join(DATA, `ctx-${argSid}.json`)];
@@ -189,6 +199,14 @@ if ((sessionFile || (machine && argSid)) && agent === "codex") {
 
 // Разбивка контекста Claude (кэш /context, обновляется в фоне, когда сессия сдвинулась).
 let breakdown = null;
+// Codex: своя разбивка из файла сессии, пересчёт в фоне, когда сдвинулся счётчик токенов.
+const codexId = agent === "codex" ? (path.basename(sessionFile ?? "").match(/([0-9a-f-]{36})\.jsonl$/)?.[1] ?? (machine ? argSid : "")) : "";
+if (codexId) {
+  const f = path.join(DATA, `ctx-codex-${codexId}.json`), c = readJSON(f);
+  if (c && !c.error) breakdown = c;
+  const moved = context?.used && c?.used !== context.used;
+  if ((!c || (moved && !fresh(f, 20000))) && !fresh(`${f}.lock`, 30000)) { writeJSON(`${f}.lock`, {}); later("", sessionFile ?? "", "", "bg-codex-context", codexId, machine); }
+}
 const sid = argSid || (agent === "claude" && sessionFile ? path.basename(sessionFile, ".jsonl") : "");
 if (agent === "claude" && sid && !machine) {
   const f = path.join(DATA, `ctx-${sid}.json`), c = readJSON(f);

@@ -35,6 +35,15 @@ const CAT = {
   "System prompt": ["Системный промпт", "#9aa0a6"], "Custom agents": ["Свои агенты", PURPLE],
   "Autocompact buffer": ["Запас автосжатия", "#5c6068"], "Free space": ["Свободно", null],
   "MCP tools (deferred)": ["MCP, отложенные", null], "System tools (deferred)": ["Системные, отложенные", null],
+  // Codex (оценка по файлу сессии, сумма точная).
+  "Tool calls": ["Вызовы инструментов", "#d4a72c"], "Reasoning": ["Рассуждения", "#7f6df2"], "Compacted history": ["Сжатая история", "#6c7a89"],
+  "Images": ["Изображения", "#c76b98"], "Last reply": ["Последний ответ", "#2abb7f"], "Unaccounted": ["Не разобрано", "#5c6068"],
+};
+const CAT_TIP = {
+  "Tool calls": "Вызовы и их результаты в истории. Самые тяжёлые ниже",
+  "Reasoning": "Рассуждения текущего хода",
+  "Compacted history": "Выжимка прошлой истории после сжатия",
+  "Unaccounted": "Описания инструментов и прочее, чего нет в файле сессии",
 };
 const PR = { OPEN: ["git-pull-request", BLUE, "открыт"], DRAFT: ["git-pull-request-draft", GREY, "черновик"], MERGED: ["git-merge", PURPLE, "влит"], DECLINED: ["git-pull-request-closed", RED, "отклонён"], CLOSED: ["git-pull-request-closed", RED, "закрыт"] };
 
@@ -208,7 +217,7 @@ export default class YggPanel extends View {
     const used = b?.used ?? c.used, win = b?.window ?? c.window, pct = Math.round((used / win) * 100);
     rows.push(this.row(null, `Использовано ${pct}%`, div().text_color(t.dim).child(`${k(used)} / ${k(win)}`), t));
     // Codex не делит контекст по категориям: последний ход по токен-счётчику (кэш, новый ввод, ответ, рассуждения).
-    const cx5 = c?.codex, codexCats = cx5 ? [
+    const cx5 = c?.codex, codexCats = cx5 && !b ? [
       ["Ввод из кэша", cx5.cached, GREY, "Повторно прочитанный контекст, дешевле нового"],
       ["Новый ввод", cx5.input - cx5.cached, BRAND.codex, "Ввод, который модель прочла впервые"],
       ["Ответ", cx5.output - cx5.reasoning, GREEN, "Текст ответа и вызовы инструментов"],
@@ -225,10 +234,11 @@ export default class YggPanel extends View {
       .when(Boolean(tip), (el) => el.id(`c-${name}`).tooltip(tip));
     for (const x of b?.cats ?? []) {
       const [name, color] = CAT[x.name] ?? [x.name, GREY];
-      rows.push(line(name, x.tokens, color, /deferred/.test(x.name), /deferred/.test(x.name) ? "Подгружаются по запросу, в окно не входят" : null));
+      rows.push(line(name, x.tokens, color, /deferred/.test(x.name), /deferred/.test(x.name) ? "Подгружаются по запросу, в окно не входят" : CAT_TIP[x.name] ?? null));
     }
     for (const [name, tokens, color, tip] of codexCats) rows.push(line(name, tokens, color, false, tip));
-    if (cx5?.session) rows.push(this.row(null, "За всю сессию", div().text_color(t.dim).child(k(cx5.session)), t, "Сколько токенов сессия прошла за все ходы, с повторами контекста"));
+    const session = cx5?.session ?? b?.session;
+    if (session) rows.push(this.row(null, "За всю сессию", div().text_color(t.dim).child(k(session)), t, "Сколько токенов сессия прошла за все ходы, с повторами контекста"));
     if (!b && d.agent === "claude") rows.push(this.row(null, "Разбивка считается", null, t));
     const fold = (key, title, items, tip) => {
       if (!items?.length) return;
@@ -243,6 +253,10 @@ export default class YggPanel extends View {
     fold("mcp", "Инструменты MCP по серверам", b?.mcp, "Сколько токенов описания инструментов у каждого MCP-сервера");
     fold("memory", "Файлы памяти", b?.memory?.map((m) => ({ name: m.path.replace(/^\/Users\/[^/]+/, "~"), tokens: m.tokens })), "CLAUDE.md, AGENTS.md и память, которые Claude читает в начале");
     fold("skills", "Скиллы", b?.skills, "Описания скиллов в контексте");
+    fold("prompt", "Части системного промпта", b?.prompt, "Из каких блоков собран системный промпт");
+    fold("tools", "Системные инструменты", b?.tools, "Описания встроенных инструментов по группам");
+    fold("heavy", "Самые тяжёлые вызовы", b?.heavy?.map((h) => ({ name: `${h.name} ${h.arg}`, tokens: h.tokens })), "Вызовы инструментов, которые больше всего занимают в контексте");
+    if (b?.estimated) rows.push(this.row(null, "Доли оценены по файлу сессии", null, t, "Codex не делит контекст по категориям: доли посчитаны по истории, сумма из счётчика Codex"));
     if (d.chat && !this.float) rows.push(this.row(this.compacting ? svg("mods/workspace-chrome/spinner.svg").size(15).text_color(BLUE).spin(900) : svg(`${ICONS}/fold.svg`).size(15).text_color(t.muted),
       this.compacting ? "Сжимаю сессию" : "Сжать сессию", null, t, "Сжать контекст сессии сейчас")
       .cursor_pointer().hover((s) => s.bg(t.hover)).rounded(6).mx(6).px(8).on_click((_e, cx) => this.compact(cx)));
