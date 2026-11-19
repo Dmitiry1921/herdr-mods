@@ -201,7 +201,8 @@ export default class YggSidebar extends View {
     const ico = (name, color = t.muted) => svg(`${ICONS}/${name}.svg`).size(14).flex_none().text_color(color);
     const head = (text) => div().h(24).px(8).pt(6).text_size(11).text_color(t.dim).child(text.toUpperCase());
     const line = () => div().h(1).my(4).bg(t.border);
-    const done = (fn) => () => { close(); fn(); };
+    // Сначала дело, потом закрыть меню: меню — отдельное окно, с ним пропадает и незаконченная работа пункта.
+    const done = (fn) => async (cx) => { try { await fn(cx); } finally { close(); } };
     const root = v_flex().w_full().bg(t.popover ?? t.chrome).p(6).text_size(13).text_color(t.foreground);
     const others = rows.filter((x) => x !== r);
     // Подменю открываем заново своей высоты: всплывашка не растёт, а список в 1 строку не видно.
@@ -311,7 +312,8 @@ export default class YggSidebar extends View {
             .child(svg(`${ICONS}/${r.conf.icon ?? "folder"}.svg`).size(14).flex_none().text_color(r.conf.color ?? t.muted))
             .child(div().flex_1().min_w(0).truncate().child(r.title)))));
     }
-    const done = (fn) => (cx) => { close(); fn(cx); };
+    // Сначала дело, потом закрыть меню: меню — отдельное окно, с ним пропадает и незаконченная работа пункта.
+    const done = (fn) => async (cx) => { try { await fn(cx); } finally { close(); } };
     return root
       .child(item("rename", "pencil", "Переименовать", "Имя сессии в панели. Клик — переименовать", done(() => run("tab.rename", { id: tab.id }))))
       .child(item("pin", "pin", pinned ? "Открепить" : "Закрепить", pinned ? "Сессия наверху панели. Клик — открепить" : "Клик — закрепить наверху панели",
@@ -339,7 +341,7 @@ export default class YggSidebar extends View {
         const list = JSON.parse(raw ?? "[]");
         list.unshift({ name: tab.name ?? null, kind: info.kind, session: id, cwd, space: s.name, machine: s.machine ?? null, at: Date.now() });
         await writeTextFile(ARCHIVE(), `${JSON.stringify(list, null, 2)}\n`, raw ?? null);
-        run("tab.close", { id: tab.id });
+        run("tab.close", { id: tab.id, confirmed: true });
       }), Boolean(info.kind)));
   }
 
