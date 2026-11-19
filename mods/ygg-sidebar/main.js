@@ -16,6 +16,16 @@ const KNOWN = () => `${appHome()}/data/ygg-sidebar/known.json`;
 // Архив сессий: ушедшие из панели, их можно вернуть из меню проекта.
 const ARCHIVE = () => `${appHome()}/data/ygg-sidebar/archive.json`;
 const OPS = () => `${appHome()}/mods/ygg-sidebar/session-ops.mjs`;
+const EXTERNAL = () => `${appHome()}/mods/ygg-sidebar/external.mjs`;
+// Папка сессии относится к проекту: сама папка, внутри неё, её worktree (<папка>-worktrees/…)
+// и worktree приложения Codex (~/.codex/worktrees/<id>/<имя папки>).
+const inProject = (cwd, folder) => {
+  if (!cwd || !folder) return false;
+  const f = folder.replace(/\/$/, ""), name = f.split("/").pop();
+  if (cwd === f || cwd.startsWith(`${f}/`) || cwd.startsWith(`${f}-worktrees/`)) return true;
+  const m = cwd.match(/\/\.codex\/worktrees\/[^/]+\/([^/]+)/);
+  return Boolean(m) && m[1] === name;
+};
 const RUN = 'n=$(ls -d "$HOME"/.nvm/versions/node/*/bin/node 2>/dev/null | tail -1); exec "${n:-node}" "$0" "$@"';
 
 // SSH-цель машины Herdr (её host из hc machine ls); чат Codex на ней ходит в демон Codex по ssh.
@@ -115,6 +125,76 @@ export default class YggSidebar extends View {
     });
     load(cx);
     cx.timer.every(3000, load); // правки projects.json видны без перезапуска
+    // Сессии, начатые вне Herdr (приложения Claude и Codex, Codex на сервере): опрашивает только основная панель,
+    // копии (меню, всплывашка) берут готовое из shared.
+    if (!this.menu && !this.smenu && !this.popup) {
+      this.scanExternal(cx);
+      cx.timer.every(30000, (cx) => this.scanExternal(cx));
+    }
+  }
+
+  scanExternal(cx) {
+    if (this.scanning) return;
+    this.scanning = true;
+    const ms = [...new Set([...spaces(), ...Object.values(this.known)].map((x) => x.machine).filter(Boolean))]
+      .filter((m) => machines().find((x) => x.name === m)?.layout === "ready");
+    cx.spawn(async (cx) => {
+      try {
+        const r = await exec("sh", ["-c", RUN, EXTERNAL(), ...ms], { timeout: 60000 });
+        const d = JSON.parse(r.stdout || "null");
+        if (d) { const old = shared("ygg.ext"); for (const m of ms) if (!d.machines[m] && old?.machines?.[m]) d.machines[m] = old.machines[m]; setShared("ygg.ext", d); cx.notify(); }
+      } catch {}
+      this.scanning = false;
+    });
+  }
+
+  // Сессии проекта, начатые вне Herdr и ещё не открытые здесь.
+  external(ss, taken) {
+    const d = shared("ygg.ext");
+    if (!d) return [];
+    const known = new Set([...(d.mac?.known ?? []), ...taken]);
+    const out = [], seen = new Set();
+    for (const sp of ss) {
+      const list = sp.machine ? d.machines?.[sp.machine]?.items : d.mac?.items;
+      for (const e of list ?? []) {
+        if (known.has(e.id) || seen.has(e.id) || this.archive.some((a) => String(a.session ?? "").includes(e.id)) || !inProject(e.cwd, sp.folder)) continue;
+        seen.add(e.id);
+        out.push({ s: sp, ext: e });
+      }
+    }
+    return out.sort((a, b) => b.ext.at - a.ext.at);
+  }
+
+  // Открыть здесь сессию, начатую вне Herdr. Занятую приложением Claude — копией (форк), иначе два процесса
+  // пишут в один файл сессии. Codex сервера — чатом во вкладке этого Mac, как и свои спящие.
+  async openExternal(sp, e) {
+    if (this.popup) { setShared("ygg.popHover", false); closeOverlay(props().overlay); }
+    let to = sp.id;
+    if (sp.machine) to = await this.hostSpace(sp);
+    else if (!to) [to] = await this.ensure([sp]);
+    if (!to) return;
+    run("space.select", { id: to });
+    let session = e.id, name = e.title;
+    if (e.busy && e.kind === "claude") {
+      const r = await ops("fork", "claude", e.id, e.cwd);
+      if (!r?.ok) return;
+      session = r.path; name = `${e.title} · копия`;
+    }
+    await this.openChat(to, name, e.kind, e.cwd, session, sp.machine ?? null);
+  }
+
+  extNode(sp, e, last, t) {
+    const remote = Boolean(sp.machine);
+    const busy = e.busy;
+    const row = h_flex().id(`ext-${e.id}`).relative().h(ROW).px(6).gap(8).items_center().rounded(6).cursor_pointer()
+      .hover((st) => st.bg(t.hover))
+      .on_click((_e, cx) => { this.openExternal(sp, e); cx.notify(); })
+      .child(div().flex_none().opacity(0.55).child(this.agentIcon(e.kind, t)))
+      .child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(label(e.title, e.kind)))
+      .when(remote, (el) => el.child(this.machineMark(sp.machine, t)))
+      .child(this.slot(busy ? div().id(`busy-${e.id}`).tooltip("Открыта в приложении Claude. Клик — копия здесь")
+        .child(svg(`${ICONS}/app-window.svg`).size(12).text_color(C.working)) : null));
+    return v_flex().relative().child(this.branch(last)).child(row);
   }
 
   fold(key, cx) {
@@ -399,7 +479,7 @@ export default class YggSidebar extends View {
   // Чат Codex сервера живёт во вкладке на этом Mac: herdr-chat находит свою вкладку только в раскладке
   // этого Mac. Вкладка встаёт в здешнее пространство того же проекта (его нет — заводится). Пространство
   // на сервере не закрывается: последняя его вкладка остаётся, в ней только гасится терминал.
-  async remoteChat(s, tab, info) {
+  async hostSpace(s) {
     const title = (x) => this.cfg.projects?.[x]?.alias ?? x;
     let to = spaces().find((x) => !x.machine && title(x.name) === title(s.name))?.id;
     if (!to) {
@@ -407,6 +487,10 @@ export default class YggSidebar extends View {
       const home = (await exec("sh", ["-c", "echo $HOME"])).stdout.trim();
       [to] = await this.ensure([{ name: name ?? title(s.name), folder: k?.folder ?? home, absent: true }]);
     }
+    return to;
+  }
+  async remoteChat(s, tab, info) {
+    const to = await this.hostSpace(s);
     if (!to) return run("tab.select", { id: tab.id });
     await this.openChat(to, tab.name, "codex", info.cwd || s.folder, info.sleepId, s.machine);
     if ((s.tabs?.length ?? 0) > 1) return run("tab.close", { id: tab.id });
@@ -544,15 +628,21 @@ export default class YggSidebar extends View {
     // остальные под «Показать больше».
     const limit = conf.visible ?? this.cfg.visible ?? 5;
     const open = this.popup || this.more.has(key);
+    // Под своими — сессии этого проекта, начатые вне Herdr (свежие сверху): тоже под «Показать больше».
+    const taken = all.flatMap((i) => [i.info.sleepId, i.info.parked].filter(Boolean));
+    const ext = this.external(ss.filter((x) => !this.cfg.projects?.[x.name]?.noExternal), taken);
+    // Начатые вне Herdr за последние сутки — сразу после работающих, раньше своих спящих: новое видно без «Показать больше».
+    const day = Date.now() - 86400000, fresh = ext.filter((x) => x.ext.at > day);
+    const every = [...items.filter((i) => i.info.status), ...fresh, ...items.filter((i) => !i.info.status), ...ext.filter((x) => x.ext.at <= day)];
     let room = Math.max(0, limit - items.filter((i) => i.info.status).length);
-    const shown = open ? items : items.filter((i) => i.info.status || room-- > 0);
-    const hidden = items.length - shown.length;
+    const shown = open ? every : every.filter((i) => i.info?.status || room-- > 0);
+    const hidden = every.length - shown.length;
     const more = !this.popup && (open || hidden > 0) ? [div().id(`more-${key}`).ml(4).mt(2).mb(4).px(8).h(24).flex().items_center().self_start().rounded(6)
       .text_size(12).text_color(t.dim).bg(t.hover).cursor_pointer().hover((st) => st.text_color(t.foreground))
       .on_click((_e, cx) => { open ? this.more.delete(key) : this.more.add(key); save("ygg.more", [...this.more]); cx.notify(); })
       .child(open ? "Свернуть" : "Показать больше")] : [];
-    const body = folded || !items.length ? [] : [v_flex().relative().ml(13).pl(STUB)
-      .children(shown.map(({ s: sp, tab, info }, i) => this.sessionNode(sp, tab, info, i === shown.length - 1, t))), ...more];
+    const body = folded || !every.length ? [] : [v_flex().relative().ml(13).pl(STUB)
+      .children(shown.map(({ s: sp, tab, info, ext: e }, i) => (e ? this.extNode(sp, e, i === shown.length - 1, t) : this.sessionNode(sp, tab, info, i === shown.length - 1, t)))), ...more];
     return v_flex().child(head).children(body);
   }
 
