@@ -71,6 +71,7 @@ export default class YggSidebar extends View {
     this.popup = props()?.popup ?? null; // копия мода во всплывашке свёрнутой панели
     this.menu = props()?.menu ?? null; // копия мода в меню проекта (правый клик)
     this.smenu = props()?.smenu ?? null; // копия мода в меню сессии: { tab, space }
+    this.view = props()?.view ?? null; // подменю проекта: "merge" | "group"
     this.archive = [];
     this.known = {};
     this.cfg = { groups: ["Работа", "Личное"], projects: {} };
@@ -175,7 +176,7 @@ export default class YggSidebar extends View {
   }
   menuHeight(r) {
     const m = this.menuItems(r);
-    return 12 + 28 + 9 + (m.archived.length ? 24 + m.archived.length * 28 + 9 : 0) + (m.split ? 28 : 0) + (m.absent ? 28 : 0) + 28;
+    return 12 + 28 + 28 + 9 + (m.archived.length ? 24 + m.archived.length * 28 + 9 : 0) + (m.split ? 28 : 0) + (m.absent ? 28 : 0) + 28;
   }
 
   menuView(rows, t) {
@@ -189,21 +190,44 @@ export default class YggSidebar extends View {
     const head = (text) => div().h(24).px(8).pt(6).text_size(11).text_color(t.dim).child(text.toUpperCase());
     const line = () => div().h(1).my(4).bg(t.border);
     const done = (fn) => () => { close(); fn(); };
-    const root = v_flex().w_full().bg(t.popover ?? t.chrome).p(6).text_size(13).text_color(t.foreground);
+    const root = v_flex().size_full().min_h(0).bg(t.popover ?? t.chrome).p(6).text_size(13).text_color(t.foreground);
     const others = rows.filter((x) => x !== r);
+    // Подменю открываем заново своей высоты: всплывашка не растёт, а список в 1 строку не видно.
+    const sub = (view, n) => () => {
+      close();
+      openOverlay({ mod: "ygg-sidebar", kind: "popup", width: 280, height: view ? 12 + 28 + 9 + Math.min(n, 12) * 28 : this.menuHeight(r),
+        at: props().at, props: { menu: r.s.name, at: props().at, view } });
+    };
+    const back = (text) => item("back", ico("chevron-left"), text, "Клик — назад к меню проекта", sub(null));
+    const setAll = (patch) => done(() => editConfig((pr) => { for (const x of r.ss) {
+      pr[x.name] = { ...pr[x.name], ...patch };
+      for (const k of Object.keys(patch)) if (patch[k] == null) delete pr[x.name][k];
+    } }));
     if (this.view === "merge") {
-      return root
-        .child(item("back", ico("chevron-left"), `Объединить «${r.title}» с`, "Клик — назад к меню проекта", (cx) => { this.view = null; cx.notify(); }))
-        .child(line())
-        .child(v_flex().id("merge-list").h(this.menuHeight(r) - 12 - 28 - 9).overflow_y_scrollbar().children(others.map((o) =>
+      return root.child(back(`Объединить «${r.title}» с`)).child(line())
+        .child(v_flex().id("merge-list").flex_1().min_h(0).overflow_y_scrollbar().children(others.map((o) =>
           item(`merge-${o.s.name}`, ico(o.conf.icon ?? "folder", o.conf.color ?? t.muted), o.title,
             `Один проект «${o.title}», сессии обоих вместе. Клик — объединить`,
-            done(() => editConfig((pr) => { for (const x of r.ss) pr[x.name] = { ...pr[x.name], alias: o.title }; }))))));
+            setAll({ alias: o.title, group: o.conf.group ?? null, icon: o.conf.icon ?? null, color: o.conf.color ?? null })))));
+    }
+    if (this.view === "group") {
+      const gs = [...(this.cfg.groups ?? []), "Без группы"];
+      return root.child(back(`Группа «${r.title}»`)).child(line())
+        .child(v_flex().id("group-list").flex_1().min_h(0).overflow_y_scrollbar()
+          .children(gs.map((g) => item(`group-${g}`, ico(g === r.group ? "pin" : "folder", g === r.group ? t.foreground : t.dim), g,
+            g === r.group ? "Сейчас здесь" : `Перенести проект в «${g}». Клик — перенести`,
+            g === r.group ? done(() => {}) : setAll({ group: g === "Без группы" ? null : g }))))
+          .child(item("group-new", ico("plus"), "Новая группа", "Клик — назвать группу в настройках, проект попадёт в неё",
+            done(() => openOverlay({ mod: "ygg-settings", kind: "dialog", width: 640, height: 560, props: { newGroupFor: r.ss.map((x) => x.name) } })))));
     }
     const m = this.menuItems(r);
     return root
       .child(item("merge", ico("merge"), "Объединить с проектом", "Два проекта под одним именем, например Mac и сервер. Клик — выбрать проект",
-        (cx) => { this.view = "merge"; cx.notify(); }, svg(`${ICONS}/chevron-right.svg`).size(12).text_color(t.dim)))
+        sub("merge", others.length), svg(`${ICONS}/chevron-right.svg`).size(12).text_color(t.dim)))
+      .child(item("group", ico("folder-input"), "Группа", `Сейчас «${r.group}». Клик — выбрать группу`,
+        sub("group", (this.cfg.groups ?? []).length + 2), h_flex().gap(4).items_center()
+          .child(div().max_w(90).truncate().text_size(12).text_color(t.dim).child(r.group))
+          .child(svg(`${ICONS}/chevron-right.svg`).size(12).text_color(t.dim))))
       .child(line())
       .when(m.archived.length > 0, (el) => el.child(head("Архив")).children(m.archived.map((a, i) =>
         item(`restore-${i}`, ico("archive-restore"), a.name ?? "Без названия", `В архиве с ${new Date(a.at).toLocaleDateString("ru")}. Клик — вернуть чатом`, done(async () => {
@@ -256,7 +280,7 @@ export default class YggSidebar extends View {
     const cwd = info.cwd || s.folder;
     const here = rows.find((r) => r.ss.some((x) => x.id === s.id));
     const targets = rows.filter((r) => r !== here && r.ss.some((x) => !x.machine));
-    const root = v_flex().w_full().bg(t.popover ?? t.chrome).p(6).text_size(13).text_color(t.foreground);
+    const root = v_flex().size_full().min_h(0).bg(t.popover ?? t.chrome).p(6).text_size(13).text_color(t.foreground);
     if (this.view === "move") {
       return root
         .child(item("back", "chevron-left", "Перенести в проект", "Клик — назад к меню сессии", (cx) => { this.view = null; cx.notify(); }))
@@ -467,7 +491,7 @@ export default class YggSidebar extends View {
       .tooltip(`${ss.map((x) => `${x.folder}${x.machine ? ` на ${x.machine}` : ""}`).join(", ")}. Клик — ${folded ? "развернуть" : "свернуть"}, перетащить — поменять место или группу, правый клик — объединить с другим проектом`)
       .on_hover((h, cx) => { this.hovered = h ? pkey : this.hovered === pkey ? null : this.hovered; cx.notify(); }), "p", key, group, (_e, cx) => this.fold(key, cx))
       .on_mouse_down("right", (e) => openOverlay({ mod: "ygg-sidebar", kind: "popup", width: 280, height: this.menuHeight({ ss }),
-        at: { x: e.position?.x ?? 40, y: e.position?.y ?? 80 }, props: { menu: key } }))
+        at: { x: e.position?.x ?? 40, y: e.position?.y ?? 80 }, props: { menu: key, at: { x: e.position?.x ?? 40, y: e.position?.y ?? 80 } } }))
       .child(svg(`${ICONS}/${conf.icon ?? "folder"}.svg`).size(15).flex_none().text_color(color))
       .child(div().flex_initial().min_w(0).truncate().font_medium().text_color(t.foreground).child(title))
       .child(svg(`${ICONS}/chevron-${folded ? "right" : "down"}.svg`).size(12).flex_none().text_color(t.dim))
