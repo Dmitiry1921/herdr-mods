@@ -4,7 +4,7 @@
 // Данные собирает collect.mjs (раз в 5 с и при смене вкладки).
 
 import { View, div, svg, image } from "gpui-kit";
-import { v_flex, h_flex } from "gpui-base";
+import { v_flex, h_flex, ScrollHandle } from "gpui-base";
 import { spaces, terminals, panes, props, shared, setShared, theme, appHome, exec, layout, run } from "herdr";
 
 const ICONS = "mods/ygg-panel/icons";
@@ -54,6 +54,8 @@ export default class YggPanel extends View {
     // Старые настройки разделов из localStorage панели переезжают в shared один раз.
     if (!props()?.pins && shared(PREFS) == null) { try { const v = JSON.parse(localStorage.getItem(PREFS) ?? "null"); if (v) setShared(PREFS, v); } catch {} }
     this.hooks = [];
+    // Прокрутка живёт в самом виде: перерисовка и смена дерева её не сбрасывают.
+    this.scroll = ScrollHandle.new();
     cx.timer.every(5000, (cx) => this.fetch(cx));
     this.fetchHooks(cx);
     cx.timer.every(60000, (cx) => this.fetchHooks(cx));
@@ -112,7 +114,10 @@ export default class YggPanel extends View {
       try {
         const r = await exec("sh", ["-c", RUN, `${appHome()}/mods/ygg-panel/collect.mjs`, a.term, a.cwd, a.kind, "", a.sid, a.machine], { timeout: 10000 });
         const d = JSON.parse(r.stdout || "null");
-        if (JSON.stringify(d) !== JSON.stringify(this.data)) { this.data = d; cx.notify(); }
+        // Пустой ответ (таймаут, сбой) не стирает панель, а метки времени `at` не считаются изменением:
+        // иначе панель перерисовывалась каждые 5 с и при пустом ответе теряла прокрутку.
+        const same = (x) => JSON.stringify(x, (k, v) => (k === "at" ? undefined : v));
+        if (d && same(d) !== same(this.data)) { this.data = d; cx.notify(); }
       } catch {}
       this.busy = false;
     });
@@ -337,6 +342,6 @@ export default class YggPanel extends View {
     return v_flex().size_full().min_h(0).bg(t.chrome).text_size(13).text_color(t.foreground)
       .on_mouse_up("left", (_e, cx) => { if (this.drag) { this.drag = null; this.over = null; cx.notify(); } })
       // Постоянный id: по нему Herdr хранит прокрутку, без него она сбрасывается при каждой перерисовке.
-      .child(body.id("ygg-panel-scroll").flex_1().min_h(0).overflow_y_scrollbar());
+      .child(body.id("ygg-panel-scroll").flex_1().min_h(0).overflow_y_scrollbar().track_scroll(this.scroll));
   }
 }
