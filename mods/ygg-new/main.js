@@ -21,6 +21,18 @@ const CLAUDE_MODELS = [
   { id: "sonnet", name: "Sonnet 5.5" },
   { id: "haiku", name: "Haiku 5.5" },
 ];
+// Пояснения моделей Codex приходят по-английски (~/.codex/models_cache.json): известные переводим, новые остаются как есть.
+const RU = {
+  "Fast, go-to model for coding and everyday work.": "Быстрая основная модель для кода и повседневной работы",
+  "Our most capable model for complex coding and professional work.": "Самая сильная модель для сложного кода и профессиональной работы",
+  "Efficient model that excels at visual understanding and computer use.": "Экономная модель, сильна в работе с картинками и управлении компьютером",
+  "Previous generation model for coding and everyday work.": "Прошлое поколение: код и повседневная работа",
+  "Previous generation model for complex coding and professional work.": "Прошлое поколение: сложный код и профессиональная работа",
+  "Legacy model for coding and everyday work.": "Устаревшая модель для кода и повседневной работы",
+  "Fast and affordable model for easier tasks.": "Быстрая и дешёвая модель для простых задач",
+  "Legacy balanced model for agentic coding.": "Устаревшая сбалансированная модель для работы агентом",
+  "Legacy fast model for simpler tasks.": "Устаревшая быстрая модель для простых задач",
+};
 const AGENTS = [
   { id: "claude", name: "Claude", tip: "Claude Code от Anthropic" },
   { id: "codex", name: "Codex", tip: "Codex от OpenAI" },
@@ -71,7 +83,7 @@ export default class YggNew extends View {
       try {
         const cache = JSON.parse(await fs.readFile(`${appHome().replace(/\/\.config\/herdr-app\/?$/, "")}/.codex/models_cache.json`, "utf8"));
         const list = (cache.models ?? cache).filter((m) => m.visibility !== "hide");
-        this.codexModels = [{ id: "", name: "По умолчанию", tip: "Как в настройках Codex" }, ...list.map((m) => ({ id: m.slug, name: m.display_name ?? m.slug, tip: m.description ?? "" }))];
+        this.codexModels = [{ id: "", name: "По умолчанию", tip: "Как в настройках Codex" }, ...list.map((m) => ({ id: m.slug, name: m.display_name ?? m.slug, tip: RU[m.description] ?? m.description ?? "" }))];
       } catch {}
       try {
         const last = JSON.parse(await fs.readFile(PREF(), "utf8"));
