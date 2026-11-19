@@ -184,13 +184,13 @@ export default class YggSidebar extends View {
     if (!r) return div();
     const close = () => closeOverlay(props().overlay);
     const item = (id, icon, text, tip, act, right = null) => h_flex().id(id).h(28).px(8).gap(8).items_center().rounded(6).cursor_pointer()
-      .hover((st) => st.bg(t.hover)).tooltip(tip).on_click((_e, cx) => act(cx))
+      .hover((st) => st.bg(t.hover)).on_click((_e, cx) => act(cx))
       .child(icon).child(div().flex_1().min_w(0).truncate().child(text)).when(Boolean(right), (el) => el.child(right));
     const ico = (name, color = t.muted) => svg(`${ICONS}/${name}.svg`).size(14).flex_none().text_color(color);
     const head = (text) => div().h(24).px(8).pt(6).text_size(11).text_color(t.dim).child(text.toUpperCase());
     const line = () => div().h(1).my(4).bg(t.border);
     const done = (fn) => () => { close(); fn(); };
-    const root = v_flex().size_full().min_h(0).bg(t.popover ?? t.chrome).p(6).text_size(13).text_color(t.foreground);
+    const root = v_flex().w_full().bg(t.popover ?? t.chrome).p(6).text_size(13).text_color(t.foreground);
     const others = rows.filter((x) => x !== r);
     // Подменю открываем заново своей высоты: всплывашка не растёт, а список в 1 строку не видно.
     const sub = (view, n) => () => {
@@ -205,7 +205,7 @@ export default class YggSidebar extends View {
     } }));
     if (this.view === "merge") {
       return root.child(back(`Объединить «${r.title}» с`)).child(line())
-        .child(v_flex().id("merge-list").flex_1().min_h(0).overflow_y_scrollbar().children(others.map((o) =>
+        .child(v_flex().id("merge-list").h(Math.min(others.length, 12) * 28).overflow_y_scrollbar().children(others.map((o) =>
           item(`merge-${o.s.name}`, ico(o.conf.icon ?? "folder", o.conf.color ?? t.muted), o.title,
             `Один проект «${o.title}», сессии обоих вместе. Клик — объединить`,
             setAll({ alias: o.title, group: o.conf.group ?? null, icon: o.conf.icon ?? null, color: o.conf.color ?? null })))));
@@ -213,10 +213,9 @@ export default class YggSidebar extends View {
     if (this.view === "group") {
       const gs = [...(this.cfg.groups ?? []), "Без группы"];
       return root.child(back(`Группа «${r.title}»`)).child(line())
-        .child(v_flex().id("group-list").flex_1().min_h(0).overflow_y_scrollbar()
-          .children(gs.map((g) => item(`group-${g}`, ico(g === r.group ? "pin" : "folder", g === r.group ? t.foreground : t.dim), g,
-            g === r.group ? "Сейчас здесь" : `Перенести проект в «${g}». Клик — перенести`,
-            g === r.group ? done(() => {}) : setAll({ group: g === "Без группы" ? null : g }))))
+        .child(v_flex().id("group-list").h(Math.min(gs.length + 1, 12) * 28).overflow_y_scrollbar()
+          .children(gs.map((g) => item(`group-${g}`, ico("folder", g === r.group ? t.foreground : t.dim), g, null,
+            g === r.group ? done(() => {}) : setAll({ group: g === "Без группы" ? null : g })).when(g === r.group, (el) => el.bg(t.selected))))
           .child(item("group-new", ico("plus"), "Новая группа", "Клик — назвать группу в настройках, проект попадёт в неё",
             done(() => openOverlay({ mod: "ygg-settings", kind: "dialog", width: 640, height: 560, props: { newGroupFor: r.ss.map((x) => x.name) } })))));
     }
@@ -270,7 +269,7 @@ export default class YggSidebar extends View {
     const why = !local ? "она на сервере" : "это не сессия агента";
     // Пункт меню: значок, подпись, справа — подсказка-стрелка. Недоступный — серый, в подсказке почему.
     const item = (id, icon, text, tip, act, on = true, right = null) => h_flex().id(id).h(28).px(8).gap(8).items_center().rounded(6)
-      .text_color(on ? t.foreground : t.dim).tooltip(on ? tip : `${tip.split(". Клик")[0]}. Для этой сессии пока нет: ${why}`)
+      .text_color(on ? t.foreground : t.dim).when(!on, (el) => el.tooltip(`Недоступно: ${why}`))
       .when(on, (el) => el.cursor_pointer().hover((st) => st.bg(t.hover)).on_click((_e, cx) => act(cx)))
       .child(svg(`${ICONS}/${icon}.svg`).size(14).flex_none().text_color(on ? t.muted : t.dim))
       .child(div().flex_1().min_w(0).truncate().child(text))
@@ -280,14 +279,13 @@ export default class YggSidebar extends View {
     const cwd = info.cwd || s.folder;
     const here = rows.find((r) => r.ss.some((x) => x.id === s.id));
     const targets = rows.filter((r) => r !== here && r.ss.some((x) => !x.machine));
-    const root = v_flex().size_full().min_h(0).bg(t.popover ?? t.chrome).p(6).text_size(13).text_color(t.foreground);
+    const root = v_flex().w_full().bg(t.popover ?? t.chrome).p(6).text_size(13).text_color(t.foreground);
     if (this.view === "move") {
       return root
         .child(item("back", "chevron-left", "Перенести в проект", "Клик — назад к меню сессии", (cx) => { this.view = null; cx.notify(); }))
         .child(line())
         .child(v_flex().id("move-list").h(186).overflow_y_scrollbar().children(targets.map((r) =>
           h_flex().id(`move-${r.s.name}`).h(28).px(8).gap(8).items_center().rounded(6).cursor_pointer().hover((st) => st.bg(t.hover))
-            .tooltip(`Сессия продолжится чатом в проекте «${r.title}». Клик — перенести`)
             .on_click(async () => {
               close();
               const id = await this.sessionOf(info);
@@ -336,7 +334,7 @@ export default class YggSidebar extends View {
     return div().id(`new-${ss[0].name}`).size(18).flex_none().flex().items_center().justify_center().rounded(4)
       .when(!show, (e) => e.opacity(0))
       .hover((st) => st.bg(t.hover))
-      .tooltip("Новая сессия в проекте. Клик — выбрать агента, модель и где запускать")
+      .tooltip("Новая сессия")
       .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
       .on_mouse_up("left", (_e, cx) => {
         cx.stop_propagation(); this.drag = null;
@@ -350,7 +348,7 @@ export default class YggSidebar extends View {
     return div().id(`pin-${key}`).size(18).flex_none().flex().items_center().justify_center().rounded(4)
       .when(!on && !show, (e) => e.opacity(0))
       .hover((st) => st.bg(t.hover))
-      .tooltip(on ? "Закреплено. Клик — открепить" : "Не закреплено. Клик — закрепить наверху")
+      .tooltip(on ? "Открепить" : "Закрепить")
       .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
       .on_mouse_up("left", (_e, cx) => { cx.stop_propagation(); this.drag = null; this.pin(key, cx); })
       .child(svg(`${ICONS}/pin.svg`).size(12).text_color(on ? t.foreground : t.dim));
@@ -405,7 +403,7 @@ export default class YggSidebar extends View {
     const st = machines().find((m) => m.name === name)?.layout ?? "loading";
     const [color, word] = M[st] ?? M.loading;
     return div().id(`srv-${name}`).size(14).flex_none().flex().items_center().justify_center()
-      .tooltip(`Сервер ${name} ${word}. ${what}`)
+      .tooltip(`${name} ${word}`)
       .child(svg(`${ICONS}/server.svg`).size(12).text_color(color));
   }
 
@@ -450,7 +448,6 @@ export default class YggSidebar extends View {
     const row = this.draggable(h_flex().id(`${flat ? "pin" : "ses"}-${tab.id}`).relative().h(ROW).px(6).gap(8).items_center().rounded(6).cursor_pointer()
       .when(tab.active && s.active, (el) => el.bg(t.selected))
       .when(!(tab.active && s.active), (el) => el.hover((st) => st.bg(t.hover)))
-      .tooltip(tip)
       .on_mouse_down("right", (e) => openOverlay({ mod: "ygg-sidebar", kind: "popup", width: 280, height: 235,
         at: { x: e.position?.x ?? 40, y: e.position?.y ?? 80 }, props: { smenu: { tab: tab.id, space: s.id } } }))
       .on_hover((h, cx) => { this.hovered = h ? pkey : this.hovered === pkey ? null : this.hovered; cx.notify(); }), "s", tab.id, flat ? "__pins" : s.name, () => this.open(s, tab, info))
@@ -488,7 +485,6 @@ export default class YggSidebar extends View {
     const pkey = `p:${key}`;
     const head = this.draggable(h_flex().id(`prj-${key}`).relative().h(ROW + 2).px(6).gap(8).items_center().rounded(6).cursor_pointer()
       .hover((st) => st.bg(t.hover))
-      .tooltip(`${ss.map((x) => `${x.folder}${x.machine ? ` на ${x.machine}` : ""}`).join(", ")}. Клик — ${folded ? "развернуть" : "свернуть"}, перетащить — поменять место или группу, правый клик — объединить с другим проектом`)
       .on_hover((h, cx) => { this.hovered = h ? pkey : this.hovered === pkey ? null : this.hovered; cx.notify(); }), "p", key, group, (_e, cx) => this.fold(key, cx))
       .on_mouse_down("right", (e) => openOverlay({ mod: "ygg-sidebar", kind: "popup", width: 280, height: this.menuHeight({ ss }),
         at: { x: e.position?.x ?? 40, y: e.position?.y ?? 80 }, props: { menu: key, at: { x: e.position?.x ?? 40, y: e.position?.y ?? 80 } } }))
@@ -511,7 +507,6 @@ export default class YggSidebar extends View {
     const hidden = items.length - shown.length;
     const more = !this.popup && (open || hidden > 0) ? [div().id(`more-${key}`).ml(4).mt(2).mb(4).px(8).h(24).flex().items_center().self_start().rounded(6)
       .text_size(12).text_color(t.dim).bg(t.hover).cursor_pointer().hover((st) => st.text_color(t.foreground))
-      .tooltip(open ? "Показаны все сессии. Клик — свернуть до активных" : `Ещё ${hidden} спящих сессий. Клик — показать все`)
       .on_click((_e, cx) => { open ? this.more.delete(key) : this.more.add(key); save("ygg.more", [...this.more]); cx.notify(); })
       .child(open ? "Свернуть" : "Показать больше")] : [];
     const body = folded || !items.length ? [] : [v_flex().relative().ml(13).pl(STUB)
@@ -559,7 +554,7 @@ export default class YggSidebar extends View {
       }),
     ]);
     return v_flex().size_full().min_h(0).bg(t.chrome).items_center()
-      .child(cell("rail-unfold").mt(6).tooltip("Панель свёрнута. Клик — развернуть").on_click(unfold)
+      .child(cell("rail-unfold").mt(6).tooltip("Развернуть панель").on_click(unfold)
         .child(svg(`${ICONS}/sidebar.svg`).size(15).text_color(t.muted)))
       .child(v_flex().flex_1().min_h(0).w_full().items_center().gap(2).py(6).overflow_y_scrollbar().children(icons));
   }
@@ -616,7 +611,8 @@ export default class YggSidebar extends View {
         .child(r ? v_flex().flex_1().min_h(0).overflow_y_scrollbar().child(this.project(r.s.name, r.title, r.ss, r.conf, r.group, tabTerms, ps, kids, t)) : div());
     }
     if (narrow()) return this.rail(sections, tabTerms, ps, kids, t);
-    const header = (g) => div().h(26).px(8).pt(10).flex_none().text_size(11).text_color(t.dim).child(g.toUpperCase());
+    const header = (g) => div().id(`hdr-${g}`).h(26).px(8).pt(10).flex_none().text_size(11).text_color(t.dim).cursor_pointer()
+      .hover((st) => st.text_color(t.muted)).on_click(() => openOverlay({ mod: "ygg-settings", kind: "dialog", width: 640, height: 560 })).child(g.toUpperCase());
     return v_flex().size_full().min_h(0).bg(t.chrome).text_size(13)
       .child(v_flex().flex_1().min_h(0).px(8).pb(14).overflow_y_scrollbar()
         .on_mouse_up("left", (_e, cx) => { if (this.drag) { this.drag = null; this.over = null; cx.notify(); } })
