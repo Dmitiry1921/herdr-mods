@@ -16,5 +16,6 @@ for f in $(cd "$HERE/overrides" && find . -type f); do
   [ -f "$dst" ] && [ ! -f "$dst.orig" ] && cp "$dst" "$dst.orig"
   cp "$HERE/overrides/$f" "$dst"; echo "правка $f"
 done
+mkdir -p "$HERDR/themes" && cp "$HERE/themes/"*.json "$HERDR/themes/"
 mkdir -p "$HERDR/layouts" && cp "$HERE/layouts/"*.json "$HERDR/layouts/"
 echo "Раскладка ygg: herdr-app do layout.switch '{\"name\":\"ygg\"}'"

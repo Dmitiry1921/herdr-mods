@@ -202,5 +202,9 @@
         }
       }
     }
-  ]
+  ],
+  "theme": {
+    "light": "paper",
+    "dark": "codex"
+  }
 }
