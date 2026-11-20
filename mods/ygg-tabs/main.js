@@ -190,13 +190,13 @@ export default class Tabs extends View {
     const lead = cur && (panes().find(p => p.tab === cur.id && p.program?.agent) ?? panes().find(p => p.tab === cur.id));
     const term = cur && terminals().find(x => x.labels?.["herdr.tab"] === cur.id);
     const sig = `${term?.labels?.["herdr-chat.provider"] ?? ""} ${term?.labels?.["ygg.kind"] ?? ""} ${term?.report?.app ?? ""} ${lead?.program?.key ?? ""} ${(term?.argv ?? []).join(" ")}`;
-    const kind = /codex/.test(sig) ? "codex" : /claude/.test(sig) ? "claude" : null;
+    const kind = /codex/.test(sig) ? "codex" : /claude/.test(sig) ? "claude" : /deepseek|\bdsh/.test(sig) ? "deepseek" : null;
     // ygg: агент, запущенный в терминале, можно перевести в чат: терминал закрывается, та же сессия продолжается чатом.
     const toChat = cur && !space?.machine && !panes().some((p) => p.tab === cur.id && p.mod === "chat") ? this.chatTarget(cur, kind) : null;
     const title = cur ? h_flex().id("ygg-title").min_w(0).gap(8).items_center().text_size(13.5).text_color(t.foreground)
       .on_mouse_down("left", (e, cx) => { cx.stop_propagation(); if (e.click_count === 2) run("tab.rename", { id: cur.id }); })
       .tooltip("Текущая сессия. Двойной клик — переименовать")
-      .child(kind ? image(`mods/ygg-sidebar/icons/${kind}.svg`).size(16) : svg("icons/shell.svg").size(15).text_color(t.muted))
+      .child(kind ? image(`mods/ygg-sidebar/icons/${kind === "deepseek" ? "deepseek-badge" : kind}.svg`).size(16) : svg("icons/shell.svg").size(15).text_color(t.muted))
       .child(div().min_w(0).truncate().font_medium().child(label(cur, lead)))
       .child(div().flex_none().text_color(t.dim).child(space?.name ?? ""))
       .when(Boolean(toChat), (el) => el.child(this.chatButton(toChat, cur, space, t))) : div();

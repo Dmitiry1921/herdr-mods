@@ -33,7 +33,7 @@ ws.onopen = () => ws.send(JSON.stringify({ t: "hello", token: st.token, client: 
 ws.onclose = () => { process.stdout.write(JSON.stringify({ ok: false, error: "чат закрылся" })); process.exit(0); };
 ws.onmessage = (m) => {
   const r = JSON.parse(m.data);
-  if (r.t === "snapshot") { ready(r.state); if (r.state?.agentVersion || (r.state?.phase && r.state.phase !== "starting")) alive = true; }
+  if (r.t === "snapshot") { ready(r.state); modelNow = r.state?.model?.id ?? modelNow; /* модель уже нужная: патча о смене не будет */ if (r.state?.agentVersion || (r.state?.phase && r.state.phase !== "starting")) alive = true; }
   if (r.t === "patch" && (r.state?.agentVersion || (r.state?.phase && r.state.phase !== "starting"))) alive = true;
   if (r.t === "patch" && r.state?.model?.id) modelNow = r.state.model.id;
   if (r.t === "patch" && (r.upsert ?? []).some((it) => it.kind === "user")) sent = true;

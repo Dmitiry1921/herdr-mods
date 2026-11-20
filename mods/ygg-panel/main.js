@@ -95,7 +95,7 @@ export default class YggPanel extends View {
     const term = mine[0];
     const chat = panes().find((x) => x.tab === tab.id && x.mod === "chat");
     const argv = (term?.argv ?? []).join(" ");
-    const kind = term?.labels?.["ygg.kind"] ?? (/codex/.test(argv) ? "codex" : /claude/.test(argv) ? "claude" : term?.report?.app ?? "");
+    const kind = term?.labels?.["ygg.kind"] ?? (/codex/.test(argv) ? "codex" : /claude/.test(argv) ? "claude" : /\bdsh/.test(argv) ? "deepseek" : term?.report?.app ?? "");
     // Чат Codex сервера живёт во вкладке на Mac: его машина — в props чата.
     const host = mine.find((x) => x.labels?.["herdr-chat.role"] === "host" && x.state === "live") ?? (chat?.props?.chat ? terminals().find((x) => x.labels?.["herdr-chat.chat"] === chat.props.chat) : null);
     // Хост чата сервера запущен с --remote <машина>, даже если в props чата её нет.

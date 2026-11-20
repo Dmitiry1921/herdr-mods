@@ -58,6 +58,29 @@ function claude() {
   return out;
 }
 
+// Сессии DeepSeek Harness (~/.dsh/sessions/<папка>/session-<uuid>/session.v4.jsonl.zstd): каждая запись — свой кадр zstd,
+// CLI zstd читает их подряд. Папка и название — из записей session и session/title; без сообщений пользователя не показываем.
+function dsh() {
+  const root = path.join(process.env.DSH_HOME ?? path.join(H, ".dsh"), "sessions");
+  if (!fs.existsSync(root)) return [];
+  const out = [];
+  for (const a of fs.readdirSync(root)) for (const b of fs.readdirSync(path.join(root, a)).filter((x) => x.startsWith("session-"))) {
+    const file = path.join(root, a, b, "session.v4.jsonl.zstd");
+    try {
+      const at = fs.statSync(file).mtimeMs;
+      if (at < since) continue;
+      const recs = execFileSync("zstd", ["-dcq", file], { maxBuffer: 1 << 26, env: { ...process.env, PATH: `/opt/homebrew/bin:/usr/local/bin:${process.env.PATH}` } }).toString().split("\n").flatMap((l) => { try { return [JSON.parse(l)]; } catch { return []; } });
+      const cwd = recs.find((r) => r.type === "session")?.cwd;
+      const first = recs.find((r) => r.type === "user/message");
+      if (!cwd || !first) continue;
+      const title = recs.findLast((r) => r.type === "session/title" && r.data?.title)?.data?.title
+        ?? first.data?.message?.content?.find?.((c) => c.type === "text")?.text;
+      out.push({ kind: "deepseek", id: b.slice(8), title: nice(null, title), cwd, at, busy: false });
+    } catch {}
+  }
+  return out;
+}
+
 function known() {
   const dir = path.join(H, ".config/herdr-app/data/herdr-chat/chats");
   const ids = new Set();
@@ -74,7 +97,7 @@ function known() {
 
 const here = () => {
   const items = [];
-  for (const f of [codex, claude]) { try { items.push(...f()); } catch {} }
+  for (const f of [codex, claude, dsh]) { try { items.push(...f()); } catch {} }
   return { items, known: known() };
 };
 

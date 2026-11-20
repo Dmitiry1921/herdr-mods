@@ -36,6 +36,13 @@ const RU = {
 const AGENTS = [
   { id: "claude", name: "Claude", tip: "Claude Code от Anthropic" },
   { id: "codex", name: "Codex", tip: "Codex от OpenAI" },
+  { id: "deepseek", name: "DeepSeek", tip: "DeepSeek Harness (dsh), только на этом Mac" },
+];
+// Модели DeepSeek Harness: id как в списке моделей чата (группа провайдера в профиле dsh acp).
+const DEEPSEEK_MODELS = [
+  { id: "", name: "По умолчанию", tip: "Последняя выбранная в чате DeepSeek" },
+  { id: "deepseek/deepseek-v4-flash", name: "V4 Flash", tip: "Быстрая и дешёвая" },
+  { id: "deepseek/deepseek-v4-pro", name: "V4 Pro", tip: "Сильнее и дороже" },
 ];
 // Общие режимы: один список для всех агентов, у каждого агента свой id режима herdr-chat (нет id — режима у агента нет).
 // Claude на сервере идёт терминалом: id режима уходит в --permission-mode.
@@ -101,7 +108,7 @@ export default class YggNew extends View {
     });
   }
 
-  models() { return this.agent === "claude" ? CLAUDE_MODELS : this.codexModels; }
+  models() { return this.agent === "claude" ? CLAUDE_MODELS : this.agent === "deepseek" ? DEEPSEEK_MODELS : this.codexModels; }
   spaces() { return this.sel ?? this.ids.map((id) => spaces().find((s) => s.id === id)).filter(Boolean); }
 
   // Проекты для списка: пространства с одним видимым именем (алиас) — один проект, как в ygg-sidebar.
@@ -120,7 +127,7 @@ export default class YggNew extends View {
   }
 
   modes() { return MODES.filter((m) => m[this.agent]); }
-  modeOf() { return this.modes().find((m) => m.key === this.mode) ?? MODES.find((m) => m.key === "auto"); }
+  modeOf() { return this.modes().find((m) => m.key === this.mode) ?? MODES.find((m) => m.key === "auto"); } // режимов нет (DeepSeek) — чипа нет
   setAgent(id) {
     this.agent = id;
     this.model = Math.max(0, this.models().findIndex((m) => m.id === this.lastModels?.[id]));
@@ -202,6 +209,7 @@ export default class YggNew extends View {
     const name = text.split("\n")[0].slice(0, 60);
     const on = sp.machine ?? null;
     try {
+      if (on && this.agent === "deepseek") throw new Error("DeepSeek запускается только на этом Mac");
       // Проект без открытого пространства: заводим его в той же папке и на той же машине, как боковая панель.
       if (sp.absent) {
         run("space.new", { name: sp.name, folder: sp.folder, machine: sp.machine ?? "", focus: false });
@@ -227,7 +235,7 @@ export default class YggNew extends View {
         // Вкладка чата только на этом Mac (herdr-chat ищет её в здешней раскладке): здешнее пространство проекта.
         const here = on ? (this.spaces().find((x) => !x.machine) ?? spaces().find((x) => !x.machine) ?? sp).id : sp.id;
         run("tab.new", { space: here, name, mod: "chat", props: { chat, provider: this.agent, cwd, ...(remote ? { remote } : {}) } });
-        exec("sh", ["-c", RUN, `${appHome()}/mods/ygg-new/start.mjs`, chat, model, mode[this.agent], text], { timeout: 90000 }).catch(() => {});
+        exec("sh", ["-c", RUN, `${appHome()}/mods/ygg-new/start.mjs`, chat, model, mode[this.agent] ?? "", text], { timeout: 90000 }).catch(() => {});
       } else {
         // Сюда доходит только Claude: Codex и на сервере открывается чатом.
         const argv = ["claude", ...(model ? ["--model", model] : []), "--permission-mode", mode.claude, text];
@@ -256,12 +264,12 @@ export default class YggNew extends View {
       .child(v_flex().rounded(14).border_1().border_color(t.border).bg(t.background ?? t.chrome)
         .child(div().px(12).pt(10).pb(4).child(Input.new(this.input).w_full()))
         .child(h_flex().px(6).pb(6).gap(2).items_center()
-          .child(this.picker("mode", ico(mode.icon, mode.color), mode.name, `Как подтверждать действия ${AGENTS.find((a) => a.id === this.agent)?.name}?`,
+          .when(this.modes().length > 0, (el) => el.child(this.picker("mode", ico(mode.icon, mode.color), mode.name, `Как подтверждать действия ${AGENTS.find((a) => a.id === this.agent)?.name}?`,
             this.modes().map((m) => ({ key: m.key, icon: ico(m.icon, m.color), name: m.name, tip: m.tip, color: m.color })), mode.key,
-            (it) => { this.mode = it.key; }, t, { color: mode.color }))
+            (it) => { this.mode = it.key; }, t, { color: mode.color })))
           .child(div().flex_1())
-          .child(this.picker("agent", image(`${SIDEBAR}/${this.agent}.svg`).size(14), AGENTS.find((a) => a.id === this.agent)?.name ?? this.agent, "Агент",
-            AGENTS.map((a) => ({ key: a.id, icon: image(`${SIDEBAR}/${a.id}.svg`).size(16), name: a.name, tip: a.tip })), this.agent,
+          .child(this.picker("agent", image(`${SIDEBAR}/${this.agent === "deepseek" ? "deepseek-badge" : this.agent}.svg`).size(14), AGENTS.find((a) => a.id === this.agent)?.name ?? this.agent, "Агент",
+            AGENTS.map((a) => ({ key: a.id, icon: image(`${SIDEBAR}/${a.id === "deepseek" ? "deepseek-badge" : a.id}.svg`).size(16), name: a.name, tip: a.tip })), this.agent,
             (it) => this.setAgent(it.key), t, { on: true, anchor: "bottom_right", width: 260 }))
           .child(this.picker("model", null, models[this.model]?.name ?? "По умолчанию", "Модель",
             models.map((m, i) => ({ key: i, name: m.name, tip: m.tip })), this.model,

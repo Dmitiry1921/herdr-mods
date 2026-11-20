@@ -59,7 +59,7 @@ const C = { working: "#579dff", blocked: "#f5cd47", done: "#2abb7f", idle: "#9fa
 // Машина: доступна зелёный, отвалилась красный, подключается серый.
 const M = { ready: ["#2abb7f", "доступен"], unavailable: ["#f87168", "недоступен"], loading: ["#9fadbc", "подключается"] };
 const RANK = { blocked: 4, done: 3, working: 2, idle: 1 };
-const AGENT = { claude: "claude", "claude-code": "claude", codex: "codex" };
+const AGENT = { claude: "claude", "claude-code": "claude", codex: "codex", deepseek: "deepseek", dsh: "deepseek", "dsh-tui": "deepseek" };
 const TIP = {
   working: "Агент работает. Клик — открыть сессию",
   blocked: "Агент ждёт тебя. Клик — открыть сессию",
@@ -347,7 +347,8 @@ export default class YggSidebar extends View {
   // Открыть сессию чатом во вкладке пространства (путь к файлу: у Claude по голому id заводится новая).
   async openChat(spaceId, name, kind, cwd, session, machine = null) {
     // На сервере файл сессии не ищем: хост продолжает тред Codex по id в демоне машины.
-    const found = !machine && session && !session.startsWith("/") ? (await ops("find", kind, session)).path : session;
+    // DeepSeek (ACP) продолжает сессию по id, файла не ищем.
+    const found = !machine && session && !session.startsWith("/") && kind !== "deepseek" ? (await ops("find", kind, session)).path : session;
     const remote = machine ? await sshTarget(machine) : null;
     run("tab.new", { space: spaceId, name, mod: "chat", props: { chat: `c-${randomBytes(4).toString("hex")}`, provider: kind, cwd, session: found ?? session, ...(remote ? { remote } : {}) } });
   }
@@ -462,7 +463,7 @@ export default class YggSidebar extends View {
       const l = t?.labels ?? {};
       // Вкладки, запаркованные без меток (codex1), узнаются по команде: codex resume / claude --resume.
       const argv = (t?.argv ?? []).join(" ");
-      const byArgv = /\bcodex\b/.test(argv) ? "codex" : /\bclaude\b/.test(argv) ? "claude" : null;
+      const byArgv = /\bcodex\b/.test(argv) ? "codex" : /\bclaude\b/.test(argv) ? "claude" : /\bdsh(-tui)?\b/.test(argv) ? "deepseek" : null;
       kind ??= AGENT[l["ygg.kind"]] ?? AGENT[l["herdr-chat.provider"]] ?? AGENT[t.report?.app] ?? AGENT[t.program?.key] ?? byArgv;
       // Codex, проснувшийся в терминале (codex resume <id>), тоже знает свой тред: по нему откроется чат.
       parked ??= l["ygg.parked"] ?? (kind === "codex" ? argv.match(/\bresume\b.*?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/)?.[1] : null) ?? null;
@@ -544,7 +545,7 @@ export default class YggSidebar extends View {
   }
 
   agentIcon(kind, t, size = 15) {
-    if (kind) return image(`${ICONS}/${kind}.svg`).w(size).h(size).flex_none();
+    if (kind) return image(`${ICONS}/${kind === "deepseek" ? "deepseek-badge" : kind}.svg`).w(size).h(size).flex_none();
     return svg(`${ICONS}/command.svg`).size(size - 2).flex_none().text_color(t.dim);
   }
 
