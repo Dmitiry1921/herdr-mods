@@ -4,8 +4,15 @@
 // Данные собирает collect.mjs (раз в 5 с и при смене вкладки).
 
 import { View, div, svg, image } from "gpui-kit";
-import { v_flex, h_flex, ScrollHandle } from "gpui-base";
+import { v_flex, h_flex, ScrollHandle, Scrollbar } from "gpui-base";
 import { spaces, terminals, panes, props, shared, setShared, theme, appHome, exec, layout, run } from "herdr";
+
+// Тонкая полоса прокрутки (3 px) вместо широкой встроенной: область прокручивается сама (overflow_y_scroll),
+// полоса — Scrollbar того же id в узкой колонке справа (он заполняет свой контейнер).
+const thin = (id, el, fill) => div().relative().w_full().flex().flex_col()
+  .when(fill === "full", (d) => d.size_full().min_h(0)).when(fill === true, (d) => d.flex_1().min_h(0))
+  .child(el)
+  .child(Scrollbar.vertical(id).absolute().top(2).bottom(2).right(0).w(3));
 
 const ICONS = "mods/ygg-panel/icons";
 // Семантика Yggdrasil: синий — идёт работа, жёлтый — упёрлись, зелёный — добавлено.
@@ -340,12 +347,12 @@ export default class YggPanel extends View {
     };
     const ids = orderOf(p).filter((id) => !this.float || p.pinned.includes(id));
     const list = ids.map((id) => parts[id]()).filter(Boolean);
-    if (this.float) return v_flex().id("ygg-pins-scroll").size_full().min_h(0).gap(8).overflow_y_scrollbar().text_size(13).text_color(t.foreground)
-      .children(list.map((x) => v_flex().flex_none().rounded(12).border_1().border_color(t.border).bg(t.chrome).pb(4).child(x)));
+    if (this.float) return thin("ygg-pins-scroll", v_flex().id("ygg-pins-scroll").size_full().min_h(0).gap(8).overflow_y_scroll().text_size(13).text_color(t.foreground)
+      .children(list.map((x) => v_flex().flex_none().rounded(12).border_1().border_color(t.border).bg(t.chrome).pb(4).child(x))), "full");
     const body = v_flex().pb(10).children(list.flatMap((x, i) => (i ? [div().mx(14).h(1).flex_none().bg(t.border), x] : [x])));
     return v_flex().size_full().min_h(0).bg(t.chrome).text_size(13).text_color(t.foreground)
       .on_mouse_up("left", (_e, cx) => { if (this.drag) { this.drag = null; this.over = null; cx.notify(); } })
       // Постоянный id: по нему Herdr хранит прокрутку, без него она сбрасывается при каждой перерисовке.
-      .child(body.id("ygg-panel-scroll").flex_1().min_h(0).overflow_y_scrollbar().track_scroll(this.scroll));
+      .child(thin("ygg-panel-scroll", body.id("ygg-panel-scroll").flex_1().min_h(0).overflow_y_scroll().track_scroll(this.scroll), true));
   }
 }
