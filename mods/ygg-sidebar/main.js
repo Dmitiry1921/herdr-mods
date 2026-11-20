@@ -5,16 +5,32 @@
 // herdr-chat на её сессии, остальные — переходом на свою вкладку.
 
 import { View, div, svg, image } from "gpui-kit";
-import { v_flex, h_flex, Scrollbar } from "gpui-base";
+import { v_flex, h_flex } from "gpui-base";
 import { spaces, terminals, panes, machines, layout, shared, setShared, openOverlay, closeOverlay, props, run, theme, appHome, readTextFile, writeTextFile, exec } from "herdr";
 import { randomBytes } from "crypto";
 
-// Тонкая полупрозрачная полоса прокрутки (2 px) вместо широкой встроенной: область прокручивается сама (overflow_y_scroll),
-// полоса — Scrollbar того же id в узкой колонке справа (он заполняет свой контейнер).
-const thin = (id, el, fill) => div().relative().w_full().flex().flex_col()
-  .when(fill === "full", (d) => d.size_full().min_h(0)).when(fill === true, (d) => d.flex_1().min_h(0))
-  .child(el)
-  .child(Scrollbar.vertical(id).absolute().top(2).bottom(2).right(0).w(2).opacity(0.5));
+// Прокрутка с тонким полупрозрачным ползунком (2 px). Ширину встроенной полосы gpui задать не даёт, а смещение не отдаёт,
+// поэтому прокрутка своя, как в ленте чата: колесо и трекпад двигают содержимое, ползунок рисуется по тем же числам.
+// fill: true растягивается (flex_1), "full" во весь родитель, число — высота в пикселях.
+const SCROLL = new Map();
+const thin = (id, el, fill) => {
+  const s = SCROLL.get(id) ?? SCROLL.set(id, { top: 0, view: 0, content: 0 }).get(id);
+  const max = Math.max(0, s.content - s.view);
+  s.top = Math.min(Math.max(0, s.top), max);
+  const h = max > 0 ? Math.max(24, (s.view * s.view) / s.content) : 0;
+  const y = max > 0 ? ((s.view - h) * s.top) / max : 0;
+  return div().id(`${id}-thin`).relative().w_full().overflow_hidden()
+    .when(fill === "full", (d) => d.size_full().min_h(0)).when(fill === true, (d) => d.flex_1().min_h(0))
+    .when(typeof fill === "number", (d) => d.h(fill).flex_none())
+    .on_size_change((z, cx) => { if (z.height !== s.view) { s.view = z.height; cx.notify(); } })
+    .on_scroll_wheel((e, cx) => {
+      const top = Math.min(Math.max(0, s.top - e.delta.y), Math.max(0, s.content - s.view));
+      if (top !== s.top) { s.top = top; cx.notify(); }
+    })
+    .child(div().absolute().left(0).right(0).top(-s.top)
+      .on_size_change((z, cx) => { if (z.height !== s.content) { s.content = z.height; cx.notify(); } }).child(el))
+    .when(h > 0, (d) => d.child(div().absolute().right(1).top(y).w(2).h(h).rounded(1).bg(theme().muted).opacity(0.5)));
+};
 
 const ICONS = "mods/ygg-sidebar/icons";
 const CONFIG = () => `${appHome()}/data/ygg-sidebar/projects.json`;
@@ -344,19 +360,19 @@ export default class YggSidebar extends View {
     } }));
     if (this.view === "merge") {
       return root.child(back(`Объединить «${r.title}» с`)).child(line())
-        .child(thin("merge-list", v_flex().id("merge-list").h(Math.min(others.length, 12) * 28).overflow_y_scroll().children(others.map((o) =>
+        .child(thin("merge-list", v_flex().id("merge-list").w_full().children(others.map((o) =>
           item(`merge-${o.s.name}`, ico(o.conf.icon ?? "folder", o.conf.color ?? t.muted), o.title,
             `Один проект «${o.title}», сессии обоих вместе. Клик — объединить`,
-            setAll({ alias: o.title, group: o.conf.group ?? null, icon: o.conf.icon ?? null, color: o.conf.color ?? null })))), false));
+            setAll({ alias: o.title, group: o.conf.group ?? null, icon: o.conf.icon ?? null, color: o.conf.color ?? null })))), Math.min(others.length, 12) * 28));
     }
     if (this.view === "group") {
       const gs = [...(this.cfg.groups ?? []), "Без группы"];
       return root.child(back(`Группа «${r.title}»`)).child(line())
-        .child(thin("group-list", v_flex().id("group-list").h(Math.min(gs.length + 1, 12) * 28).overflow_y_scroll()
+        .child(thin("group-list", v_flex().id("group-list").w_full()
           .children(gs.map((g) => item(`group-${g}`, ico("folder", g === r.group ? t.foreground : t.dim), g, null,
             g === r.group ? done(() => {}) : setAll({ group: g === "Без группы" ? null : g })).when(g === r.group, (el) => el.bg(t.selected))))
           .child(item("group-new", ico("plus"), "Новая группа", "Клик — назвать группу в настройках, проект попадёт в неё",
-            done(() => openOverlay({ mod: "ygg-settings", kind: "dialog", width: 640, height: 560, props: { newGroupFor: r.ss.map((x) => x.name) } })))), false));
+            done(() => openOverlay({ mod: "ygg-settings", kind: "dialog", width: 640, height: 560, props: { newGroupFor: r.ss.map((x) => x.name) } })))), Math.min(gs.length + 1, 12) * 28));
     }
     const m = this.menuItems(r);
     return root
@@ -426,7 +442,7 @@ export default class YggSidebar extends View {
       return root
         .child(item("back", "chevron-left", "Перенести в проект", "Клик — назад к меню сессии", (cx) => { this.view = null; cx.notify(); }))
         .child(line())
-        .child(thin("move-list", v_flex().id("move-list").h(186).overflow_y_scroll().children(targets.map((r) =>
+        .child(thin("move-list", v_flex().id("move-list").w_full().children(targets.map((r) =>
           h_flex().id(`move-${r.s.name}`).h(28).px(8).gap(8).items_center().rounded(6).cursor_pointer().hover((st) => st.bg(t.hover))
             .on_click(async () => {
               close();
@@ -437,7 +453,7 @@ export default class YggSidebar extends View {
               run("tab.close", { id: tab.id });
             })
             .child(svg(`${ICONS}/${r.conf.icon ?? "folder"}.svg`).size(14).flex_none().text_color(r.conf.color ?? t.muted))
-            .child(div().flex_1().min_w(0).truncate().child(r.title)))), false));
+            .child(div().flex_1().min_w(0).truncate().child(r.title)))), 186));
     }
     // Сначала дело, потом закрыть меню: меню — отдельное окно, с ним пропадает и незаконченная работа пункта.
     const done = (fn) => async (cx) => { try { await fn(cx); } finally { close(); } };
@@ -764,7 +780,7 @@ export default class YggSidebar extends View {
     return v_flex().size_full().min_h(0).bg(t.chrome).items_center()
       .child(cell("rail-unfold").mt(6).tooltip("Развернуть панель").on_click(unfold)
         .child(svg(`${ICONS}/sidebar.svg`).size(15).text_color(t.muted)))
-      .child(thin("ygg-rail", v_flex().id("ygg-rail").flex_1().min_h(0).w_full().items_center().gap(2).py(6).overflow_y_scroll().children(icons), true));
+      .child(thin("ygg-rail", v_flex().id("ygg-rail").w_full().items_center().gap(2).py(6).children(icons), true));
   }
 
   render() {
@@ -818,7 +834,7 @@ export default class YggSidebar extends View {
       const r = rows.find((x) => x.s.name === this.popup);
       return v_flex().id("ygg-pop").size_full().min_h(0).bg(t.popover ?? t.chrome).p(6).text_size(13)
         .on_hover((h) => { setShared("ygg.popHover", h); if (!h) setTimeout(() => { if (!shared("ygg.popHover")) closeOverlay(props().overlay); }, 350); })
-        .child(r ? thin("ygg-pop-list", v_flex().id("ygg-pop-list").flex_1().min_h(0).overflow_y_scroll().child(this.project(r.s.name, r.title, r.ss, r.conf, r.group, tabTerms, ps, kids, t)), true) : div());
+        .child(r ? thin("ygg-pop-list", v_flex().id("ygg-pop-list").w_full().child(this.project(r.s.name, r.title, r.ss, r.conf, r.group, tabTerms, ps, kids, t)), true) : div());
     }
     if (narrow()) return this.rail(sections, tabTerms, ps, kids, t);
     // Заголовок группы: клик сворачивает всю группу (вся работа или все личные проекты разом), правый клик — настройки панели.
@@ -837,7 +853,7 @@ export default class YggSidebar extends View {
         .child(this.slot(lit.length ? this.mark({ status: top(lit) }, false, t) : null));
     };
     return v_flex().size_full().min_h(0).bg(t.chrome).text_size(13)
-      .child(thin("ygg-list", v_flex().id("ygg-list").flex_1().min_h(0).px(8).pb(14).overflow_y_scroll()
+      .child(thin("ygg-list", v_flex().id("ygg-list").w_full().px(8).pb(14)
         .on_mouse_up("left", (_e, cx) => { if (this.drag) { this.drag = null; this.over = null; cx.notify(); } })
         .when(pinnedSorted.length > 0, (el) => el.child(header("Закреплённое"))
           .children(pinnedSorted.map(({ s, tab, info }) => this.sessionNode(s, tab, info, false, t, true))))

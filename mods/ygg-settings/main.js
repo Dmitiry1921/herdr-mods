@@ -2,15 +2,31 @@
 // Проекты: имя в панели (одинаковое имя у двух проектов = один проект), группа, иконка, цвет, сколько сессий видно.
 // Группы: добавить, убрать. Пишет в тот же projects.json, панель подхватывает его сама за пару секунд.
 import { View, div, svg } from "gpui-kit";
-import { v_flex, h_flex, Input, InputState, Scrollbar } from "gpui-base";
+import { v_flex, h_flex, Input, InputState } from "gpui-base";
 import { spaces, theme, appHome, readTextFile, writeTextFile, props, closeOverlay } from "herdr";
 
-// Тонкая полупрозрачная полоса прокрутки (2 px) вместо широкой встроенной: область прокручивается сама (overflow_y_scroll),
-// полоса — Scrollbar того же id в узкой колонке справа (он заполняет свой контейнер).
-const thin = (id, el, fill) => div().relative().w_full().flex().flex_col()
-  .when(fill === "full", (d) => d.size_full().min_h(0)).when(fill === true, (d) => d.flex_1().min_h(0))
-  .child(el)
-  .child(Scrollbar.vertical(id).absolute().top(2).bottom(2).right(0).w(2).opacity(0.5));
+// Прокрутка с тонким полупрозрачным ползунком (2 px). Ширину встроенной полосы gpui задать не даёт, а смещение не отдаёт,
+// поэтому прокрутка своя, как в ленте чата: колесо и трекпад двигают содержимое, ползунок рисуется по тем же числам.
+// fill: true растягивается (flex_1), "full" во весь родитель, число — высота в пикселях.
+const SCROLL = new Map();
+const thin = (id, el, fill) => {
+  const s = SCROLL.get(id) ?? SCROLL.set(id, { top: 0, view: 0, content: 0 }).get(id);
+  const max = Math.max(0, s.content - s.view);
+  s.top = Math.min(Math.max(0, s.top), max);
+  const h = max > 0 ? Math.max(24, (s.view * s.view) / s.content) : 0;
+  const y = max > 0 ? ((s.view - h) * s.top) / max : 0;
+  return div().id(`${id}-thin`).relative().w_full().overflow_hidden()
+    .when(fill === "full", (d) => d.size_full().min_h(0)).when(fill === true, (d) => d.flex_1().min_h(0))
+    .when(typeof fill === "number", (d) => d.h(fill).flex_none())
+    .on_size_change((z, cx) => { if (z.height !== s.view) { s.view = z.height; cx.notify(); } })
+    .on_scroll_wheel((e, cx) => {
+      const top = Math.min(Math.max(0, s.top - e.delta.y), Math.max(0, s.content - s.view));
+      if (top !== s.top) { s.top = top; cx.notify(); }
+    })
+    .child(div().absolute().left(0).right(0).top(-s.top)
+      .on_size_change((z, cx) => { if (z.height !== s.content) { s.content = z.height; cx.notify(); } }).child(el))
+    .when(h > 0, (d) => d.child(div().absolute().right(1).top(y).w(2).h(h).rounded(1).bg(theme().muted).opacity(0.5)));
+};
 
 const ICONS = "mods/ygg-sidebar/icons";
 const CONFIG = () => `${appHome()}/data/ygg-sidebar/projects.json`;
@@ -177,7 +193,7 @@ export default class Settings extends View {
         .child(icon("settings", 15))
         .child(div().flex_1().pl(8).font_medium().child("Настройки панели"))
         .child(btn("close", svg("mods/pane/close.svg").size(13).text_color(t.muted), "Закрыть", () => close())))
-      .child(thin("projects", v_flex().id("projects").flex_1().min_h(0).overflow_y_scroll().px(8).pb(8)
+      .child(thin("projects", v_flex().id("projects").w_full().px(8).pb(8)
         .children(sections.filter((x) => x.items.length || x.g !== NO_GROUP).flatMap(({ g, items }) => [header(g, items.length), ...items.map(row)])), true))
       .child(h_flex().px(16).py(10).gap(10).items_center().border_t(1).border_color(t.border)
         .child(this.editing === "+group"
