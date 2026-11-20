@@ -70,7 +70,7 @@ export default class YggStatus extends View {
     const rows = (L?.rows ?? []).filter((r) => r.main);
     if (!rows.length && L?.credits == null) return null;
     return h_flex().gap(10).items_center()
-      .child(image(`mods/ygg-sidebar/icons/${kind}.svg`).size(12))
+      .child(image(`mods/ygg-sidebar/icons/${kind === "deepseek" ? "deepseek-badge" : kind}.svg`).size(12))
       .children(rows.map((r) => this.meter(kind, r, t)))
       .when(L?.credits != null, (el) => el.child(h_flex().id(`credits-${kind}`).gap(4).items_center().tooltip(`Кредиты ${NAME[kind]}: ${L.credits}`)
         .child(svg("mods/ygg-status/icons/coins.svg").size(13).text_color(YELLOW)).child(div().text_color(t.foreground).child(String(L.credits)))));

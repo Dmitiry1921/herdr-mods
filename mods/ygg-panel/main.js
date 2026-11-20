@@ -162,7 +162,7 @@ export default class YggPanel extends View {
 
   agentHead(kind, plan, t) {
     return h_flex().px(14).pt(10).pb(2).gap(6).items_center().text_size(12).text_color(t.muted)
-      .child(image(`mods/ygg-sidebar/icons/${kind}.svg`).size(13))
+      .child(image(`mods/ygg-sidebar/icons/${kind === "deepseek" ? "deepseek-badge" : kind}.svg`).size(13))
       .child(`${AGENT[kind]}${plan ? ` · ${plan}` : ""}`);
   }
 
