@@ -98,6 +98,7 @@ export default class YggSidebar extends View {
     this.known = {};
     this.cfg = { groups: ["Работа", "Личное"], projects: {} };
     this.folded = new Set(loadJSON("ygg.folded", []));
+    this.gfolded = new Set(loadJSON("ygg.gfolded", []));
     this.pins = new Set(loadJSON("ygg.pins", [])); // "p:<проект>", "s:<вкладка>"
     this.order = loadJSON("ygg.order", []); // проекты
     this.sorder = loadJSON("ygg.sorder", {}); // проект -> вкладки
@@ -777,16 +778,29 @@ export default class YggSidebar extends View {
         .child(r ? v_flex().flex_1().min_h(0).overflow_y_scrollbar().child(this.project(r.s.name, r.title, r.ss, r.conf, r.group, tabTerms, ps, kids, t)) : div());
     }
     if (narrow()) return this.rail(sections, tabTerms, ps, kids, t);
-    const header = (g) => div().id(`hdr-${g}`).h(26).px(8).pt(10).flex_none().text_size(11).text_color(t.dim).cursor_pointer()
-      .hover((st) => st.text_color(t.muted)).on_click(() => openOverlay({ mod: "ygg-settings", kind: "dialog", width: 640, height: 560 })).child(g.toUpperCase());
+    // Заголовок группы: клик сворачивает всю группу (вся работа или все личные проекты разом), правый клик — настройки панели.
+    // Свёрнутая группа показывает справа самое важное из своих сессий: ждущую или работающую видно и так.
+    const header = (g, list = []) => {
+      const shut = this.gfolded.has(g);
+      const lit = shut ? [...new Set(list.flatMap((r) => r.ss.flatMap((sp) => (sp.tabs ?? []).map((tab) => this.session(tab, tabTerms, ps, kids).status)))
+        .filter((x) => x === "working" || x === "blocked"))] : [];
+      return h_flex().id(`hdr-${g}`).h(26).px(8).pt(10).gap(4).flex_none().items_center().text_size(11).text_color(t.dim).cursor_pointer()
+        .hover((st) => st.text_color(t.muted))
+        .on_click((_e, cx) => { shut ? this.gfolded.delete(g) : this.gfolded.add(g); save("ygg.gfolded", [...this.gfolded]); cx.notify(); })
+        .on_mouse_down("right", () => openOverlay({ mod: "ygg-settings", kind: "dialog", width: 640, height: 560 }))
+        .child(g.toUpperCase())
+        .child(svg(`${ICONS}/chevron-${shut ? "right" : "down"}.svg`).size(11).flex_none())
+        .child(div().flex_1())
+        .child(this.slot(lit.length ? this.mark({ status: top(lit) }, false, t) : null));
+    };
     return v_flex().size_full().min_h(0).bg(t.chrome).text_size(13)
       .child(v_flex().flex_1().min_h(0).px(8).pb(14).overflow_y_scrollbar()
         .on_mouse_up("left", (_e, cx) => { if (this.drag) { this.drag = null; this.over = null; cx.notify(); } })
         .when(pinnedSorted.length > 0, (el) => el.child(header("Закреплённое"))
           .children(pinnedSorted.map(({ s, tab, info }) => this.sessionNode(s, tab, info, false, t, true))))
         .children(sections.flatMap(({ g, list }) => [
-          header(g),
-          ...list.map(({ s, ss, title, conf, group }) => this.project(s.name, title, ss, conf, group, tabTerms, ps, kids, t)),
+          header(g, list),
+          ...(this.gfolded.has(g) ? [] : list).map(({ s, ss, title, conf, group }) => this.project(s.name, title, ss, conf, group, tabTerms, ps, kids, t)),
         ])));
   }
 }
