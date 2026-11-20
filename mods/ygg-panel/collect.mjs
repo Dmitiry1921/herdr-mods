@@ -13,6 +13,12 @@ const [, , term = "", argCwd = "", argKind = "", action = "", argSid = "", machi
 const HOME = os.homedir();
 const APP = path.join(HOME, ".config/herdr-app");
 const DATA = path.join(APP, "data/ygg-panel");
+// LiteLLM: свой шлюз у каждого, настройки вне репозитория в data/ygg-panel/litellm.json:
+// { "base_url": "https://…", "budget": 10, "period": "неделю", "keychain": "<служба в Keychain>", "model": "<самая дешёвая модель>" }.
+// Нет файла — раздела нет. ponytail: бюджет обычно стоит на пользователя, а шлюз отдаёт только расход ключа
+// (x-litellm-key-spend): при одном ключе это одно и то же, но время сброса бюджета API не отдаёт, и после сброса расход
+// ключа, скорее всего, не обнулится. Понадобится точнее: день сброса из кабинета LiteLLM и базовая точка.
+const LITELLM_CONF = path.join(DATA, "litellm.json");
 const ICONS = path.join(DATA, "icons");
 
 const readJSON = (p) => { try { return JSON.parse(fs.readFileSync(p, "utf8")); } catch { return null; } };
@@ -81,6 +87,24 @@ if (action === "bg-claude-limits") {
   const w = ev?.rate_limit_info?.unifiedWindows;
   if (w) writeJSON(path.join(DATA, "claude-status.json"), { rate_limits: Object.fromEntries(Object.entries(w).map(([k, v]) => [k, { used_percentage: Math.round((v.utilization ?? 0) * 100), resets_at: v.resetsAt }])) });
   else writeJSON(path.join(DATA, "claude-status.json.miss"), { at: Date.now() });
+  process.exit(0);
+}
+// Бюджет LiteLLM (через него ходит DeepSeek): служебные ручки /key/info и /spend/* обычному ключу закрыты (403),
+// расход ключа приходит только заголовком x-litellm-key-spend в ответе на вызов модели. Самый дешёвый вызов
+// раз в 15 минут. Ключ из LITELLM_API_KEY или Keychain (служба из litellm.json), только в заголовок запроса.
+const LITELLM = readJSON(LITELLM_CONF);
+if (action === "bg-litellm") {
+  const out = path.join(DATA, "litellm-status.json");
+  const key = process.env.LITELLM_API_KEY || (LITELLM?.keychain ? sh("security", ["find-generic-password", "-s", LITELLM.keychain, "-w"]) : "");
+  try {
+    if (!key || !LITELLM?.base_url || !LITELLM.model) throw new Error("no config");
+    const r = await fetch(`${LITELLM.base_url.replace(/\/(v1\/?)?$/, "")}/v1/chat/completions`, { method: "POST", signal: AbortSignal.timeout(30000),
+      headers: { Authorization: `Bearer ${key}`, "content-type": "application/json" },
+      body: JSON.stringify({ model: LITELLM.model, messages: [{ role: "user", content: "ok" }], max_tokens: 1 }) });
+    const spend = Number(r.headers.get("x-litellm-key-spend"));
+    if (!r.ok || !Number.isFinite(spend)) throw new Error(String(r.status));
+    writeJSON(out, { spend });
+  } catch { writeJSON(`${out}.miss`, { at: Date.now() }); }
   process.exit(0);
 }
 if (action === "bg-prs") {
@@ -162,6 +186,17 @@ function readLimits() {
       };
     }
   } catch {}
+  // DeepSeek: бюджет ключа LiteLLM. Без litellm.json раздела нет.
+  const conf = readJSON(LITELLM_CONF), budget = Number(conf?.budget);
+  const LS = path.join(DATA, "litellm-status.json");
+  if (conf && !fresh(LS, 900000) && !fresh(`${LS}.miss`, 900000) && !fresh(`${LS}.lock`, 120000)) { writeJSON(`${LS}.lock`, {}); later("", "", "", "bg-litellm"); }
+  const ls = conf && readJSON(LS);
+  if (ls && Number.isFinite(ls.spend) && budget > 0) {
+    const rest = `$${Math.max(0, budget - ls.spend).toFixed(2)}`;
+    limits.deepseek = { plan: "LiteLLM", rows: [{ label: `Бюджет · $${ls.spend.toFixed(2)} из $${budget}`, key: "$", main: true, minutes: 0, resetAt: 0,
+      pct: Math.min(100, Math.round((ls.spend / budget) * 100)), reset: `осталось ${rest}`, note: rest,
+      hint: `Расход ключа LiteLLM, лимит $${budget}${conf.period ? ` в ${conf.period}` : ""}; время сброса шлюз не сообщает` }] };
+  }
   return limits;
 }
 

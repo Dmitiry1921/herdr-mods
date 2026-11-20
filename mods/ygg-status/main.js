@@ -5,7 +5,7 @@ import { h_flex } from "gpui-base";
 import { theme, run, window, keys, appHome, exec } from "herdr";
 
 const YELLOW = "#f5cd47";
-const NAME = { claude: "Claude", codex: "Codex" };
+const NAME = { claude: "Claude", codex: "Codex", deepseek: "DeepSeek (LiteLLM)" };
 const RUN = 'n=$(ls -d "$HOME"/.nvm/versions/node/*/bin/node 2>/dev/null | tail -1); exec "${n:-node}" "$0" "$@"';
 const WD = ["воскресенье", "понедельник", "вторник", "среду", "четверг", "пятницу", "субботу"];
 
@@ -55,12 +55,13 @@ export default class YggStatus extends View {
       .when(pace != null, (el) => el.child(div().absolute().top(-3).h(10).w(1.5).left(Math.min(W - 1.5, (W * pace) / 100)).bg(t.foreground)));
     const tip = `${NAME[kind]}, ${r.key === "5h" ? "5 часов" : r.key === "W" ? "неделя" : r.label}: израсходовано ${r.pct}%`
       + (pace != null ? `, по ровному темпу было бы ${Math.round(pace)}%` : "")
-      + (r.resetAt ? `. Сброс ${when(r.resetAt)}` : "") + ". Клик — лимиты в панели";
+      + (r.resetAt ? `. Сброс ${when(r.resetAt)}` : "") + (r.note ? `, осталось ${r.note}` : "") + (r.hint ? `. ${r.hint}` : "") + ". Клик — лимиты в панели";
     return h_flex().id(`lim-${kind}-${r.key}`).gap(5).items_center().cursor_pointer().tooltip(tip).on_click(() => this.open())
       .child(div().text_size(11).text_color(t.muted).child(r.key))
       .child(track)
       .child(div().text_color(hot ? YELLOW : t.foreground).child(`${r.pct}%`))
-      .when(Boolean(r.resetAt), (el) => el.child(div().text_size(11).text_color(t.dim).child(left(r.resetAt))));
+      .when(Boolean(r.resetAt), (el) => el.child(div().text_size(11).text_color(t.dim).child(left(r.resetAt))))
+      .when(Boolean(r.note), (el) => el.child(div().text_size(11).text_color(t.dim).child(r.note)));
   }
 
   open() { run("layout.show", { id: "panel" }); run("layout.select", { stack: "panel-body", child: "summary" }); }
@@ -77,7 +78,7 @@ export default class YggStatus extends View {
 
   render() {
     const t = theme(), L = this.limits ?? {};
-    const groups = ["claude", "codex"].map((k) => this.agent(k, L[k], t)).filter(Boolean);
+    const groups = ["claude", "codex", "deepseek"].map((k) => this.agent(k, L[k], t)).filter(Boolean);
     const sep = () => div().w(1).h(14).bg(t.border);
     return h_flex().size_full().px(14).gap(14).items_center().bg(t.chrome).border_t(1).border_color(t.border).text_size(11.8).text_color(t.muted)
       .child(div().flex_1())

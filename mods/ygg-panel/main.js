@@ -10,9 +10,9 @@ import { spaces, terminals, panes, props, shared, setShared, theme, appHome, exe
 const ICONS = "mods/ygg-panel/icons";
 // Семантика Yggdrasil: синий — идёт работа, жёлтый — упёрлись, зелёный — добавлено.
 // Цвета брендов: лимиты Claude оранжевые, Codex синие, как их логотипы.
-const BRAND = { claude: "#D97757", codex: "#6a7dff" };
+const BRAND = { claude: "#D97757", codex: "#6a7dff", deepseek: "#4D6BFE" };
 const BLUE = "#579dff", YELLOW = "#f5cd47", GREEN = "#2abb7f", RED = "#f87168", GREY = "#9fadbc";
-const AGENT = { claude: "Claude", codex: "Codex" };
+const AGENT = { claude: "Claude", codex: "Codex", deepseek: "DeepSeek" };
 const RUN = 'n=$(ls -d "$HOME"/.nvm/versions/node/*/bin/node 2>/dev/null | tail -1); exec "${n:-node}" "$0" "$@"';
 const k = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e4 ? `${Math.round(n / 1000)}k` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(Math.round(n)));
 const PURPLE = "#9f8fef";
@@ -277,6 +277,10 @@ export default class YggPanel extends View {
     if (L.codex?.rows?.length) for (const r of L.codex.rows) rows.push(this.limit(r, t, BRAND.codex));
     else rows.push(this.row(null, "нет данных", null, t));
     if (L.codex?.credits != null) rows.push(this.row(null, "Кредиты", div().text_color(t.muted).child(String(L.codex.credits)), t, "Остаток кредитов Codex"));
+    if (L.deepseek?.rows?.length) {
+      rows.push(this.agentHead("deepseek", L.deepseek.plan, t));
+      for (const r of L.deepseek.rows) rows.push(this.limit(r, t, BRAND.deepseek));
+    }
     return rows;
   }
 
