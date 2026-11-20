@@ -2,7 +2,7 @@
 // показывала их рядом со своими и открывала здесь.
 //   node external.mjs [машина…]   → {"mac": {items, known}, "machines": {"<имя>": {items}}}
 //   node external.mjs --here      → {items, known} этой машины (так скрипт гоняется на сервере через hc exec)
-// items: {kind, id, title, cwd, at, busy, parent}. busy — сессия сейчас открыта приложением Claude (процесс с её id);
+// items: {kind, id, title, cwd, at, born, busy, parent}. born — когда сессия заведена (панель ставит старые выше новых). busy — сессия сейчас открыта приложением Claude (процесс с её id);
 // parent — id сессии Claude, из которой эта запущена (боковые сессии), панель вкладывает её под родителя.
 // known: [{chat, id}] сессии чатов Herdr (состояния herdr-chat). Панель прячет только те, чья вкладка сейчас открыта:
 // состояние остаётся и после закрытия вкладки (⌘W), а сессия должна вернуться в список.
@@ -33,9 +33,9 @@ function codex() {
   process.removeAllListeners("warning");
   const { DatabaseSync } = process.getBuiltinModule("node:sqlite"); // Node 22.5+, без флагов в 24
   const db = new DatabaseSync(path.join(H, ".codex", dbs[0]), { readOnly: true });
-  const rows = db.prepare("select id, name, title, cwd, updated_at from threads where archived = 0 and (first_user_message <> '' or title <> '') and source not like '{%' and source <> 'exec' and coalesce(originator, '') <> 'codex_exec' and updated_at >= ? order by updated_at desc limit 300")
+  const rows = db.prepare("select id, name, title, cwd, updated_at, created_at from threads where archived = 0 and (first_user_message <> '' or title <> '') and source not like '{%' and source <> 'exec' and coalesce(originator, '') <> 'codex_exec' and updated_at >= ? order by updated_at desc limit 300")
     .all(Math.floor(since / 1000));
-  return rows.map((r) => ({ kind: "codex", id: r.id, title: nice(r.name, r.title), cwd: r.cwd, at: r.updated_at * 1000, busy: false }));
+  return rows.map((r) => ({ kind: "codex", id: r.id, title: nice(r.name, r.title), cwd: r.cwd, at: r.updated_at * 1000, born: (r.created_at ?? r.updated_at) * 1000, busy: false }));
 }
 
 function claude() {
@@ -54,7 +54,7 @@ function claude() {
         const at = s.lastActivityAt ?? s.createdAt ?? 0;
         if (s.cliSessionId) cli.set(s.sessionId, s.cliSessionId);
         if (s.isArchived || at < since || !s.cliSessionId || !s.cwd) continue;
-        out.push({ kind: "claude", id: s.cliSessionId, title: s.title || "Без названия", cwd: s.cwd, at, busy: running.has(s.cliSessionId), from: s.spawnedFrom?.sessionId ?? null });
+        out.push({ kind: "claude", id: s.cliSessionId, title: s.title || "Без названия", cwd: s.cwd, at, born: s.createdAt ?? at, busy: running.has(s.cliSessionId), from: s.spawnedFrom?.sessionId ?? null });
       } catch {}
     }
   }
@@ -71,7 +71,7 @@ function dsh() {
   for (const a of fs.readdirSync(root)) for (const b of fs.readdirSync(path.join(root, a)).filter((x) => x.startsWith("session-"))) {
     const file = path.join(root, a, b, "session.v4.jsonl.zstd");
     try {
-      const at = fs.statSync(file).mtimeMs;
+      const st = fs.statSync(file), at = st.mtimeMs;
       if (at < since) continue;
       const recs = execFileSync("zstd", ["-dcq", file], { maxBuffer: 1 << 26, env: { ...process.env, PATH: `/opt/homebrew/bin:/usr/local/bin:${process.env.PATH}` } }).toString().split("\n").flatMap((l) => { try { return [JSON.parse(l)]; } catch { return []; } });
       const cwd = recs.find((r) => r.type === "session")?.cwd;
@@ -79,7 +79,7 @@ function dsh() {
       if (!cwd || !first) continue;
       const title = recs.findLast((r) => r.type === "session/title" && r.data?.title)?.data?.title
         ?? first.data?.message?.content?.find?.((c) => c.type === "text")?.text;
-      out.push({ kind: "deepseek", id: b.slice(8), title: nice(null, title), cwd, at, busy: false });
+      out.push({ kind: "deepseek", id: b.slice(8), title: nice(null, title), cwd, at, born: st.birthtimeMs || at, busy: false });
     } catch {}
   }
   return out;

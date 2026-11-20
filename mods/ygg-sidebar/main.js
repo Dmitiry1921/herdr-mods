@@ -167,6 +167,21 @@ export default class YggSidebar extends View {
     return out.sort((a, b) => b.ext.at - a.ext.at);
   }
 
+  // Когда сессия заведена: из списка сессий агентов (born), иначе когда панель впервые увидела вкладку (запоминается).
+  born(x, sid) {
+    const d = shared("ygg.ext");
+    if (this.bornRaw !== d) {
+      this.bornRaw = d;
+      this.bornOf = new Map([...(d?.mac?.items ?? []), ...Object.values(d?.machines ?? {}).flatMap((m) => m?.items ?? [])].map((e) => [e.id, e.born ?? e.at]));
+    }
+    if (x.ext) return x.ext.born ?? x.ext.at;
+    const id = sid(x), known = id && this.bornOf.get(id);
+    if (known) return known;
+    this.seen ??= loadJSON("ygg.seen", {});
+    if (!this.seen[x.tab.id]) { this.seen[x.tab.id] = Date.now(); save("ygg.seen", this.seen); }
+    return this.seen[x.tab.id];
+  }
+
   // Вкладка открытого чата Herdr с этой сессией: выбрать её. false — такого чата нет.
   goToChat(id) {
     for (const k of shared("ygg.ext")?.mac?.known ?? []) {
@@ -666,9 +681,10 @@ export default class YggSidebar extends View {
     // Начатые вне Herdr за последние сутки — сразу после работающих, раньше своих спящих: новое видно без «Показать больше».
     const roots = ext.filter((x) => !nested.has(x));
     const day = Date.now() - 86400000, fresh = roots.filter((x) => x.ext.at > day);
-    // Порядок не зависит от статуса: сессия, которая заработала или уснула, остаётся на месте, а не прыгает вверх и обратно
-    // (пользователь, 21.11.2026). Работающие и свежие внешние видны всегда, остальные добирают до N.
-    const every = [...items, ...fresh, ...roots.filter((x) => x.ext.at <= day)];
+    // Старые сверху, новые снизу, по времени создания, а не по статусу или активности: ничего не прыгает, а старые
+    // наверху просят решить, нужны ли они ещё (пользователь, 21.11.2026). Вкладка без известной даты — с момента, как её
+    // увидела панель. Работающие и свежие внешние видны всегда, остальные добирают до N сверху, то есть самые старые.
+    const every = [...items, ...roots].sort((a, b) => this.born(a, sid) - this.born(b, sid));
     let room = Math.max(0, limit - items.filter((i) => i.info.status).length - fresh.length);
     const shown = open ? every : every.filter((i) => i.info?.status || (i.ext && i.ext.at > day) || room-- > 0);
     const hidden = every.length - shown.length;
