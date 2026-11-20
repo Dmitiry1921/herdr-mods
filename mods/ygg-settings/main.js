@@ -3,7 +3,7 @@
 // Группы: добавить, убрать. Пишет в тот же projects.json, панель подхватывает его сама за пару секунд.
 import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, Input, InputState } from "gpui-base";
-import { spaces, theme, appHome, readTextFile, writeTextFile, props, closeOverlay, run, updates } from "herdr";
+import { spaces, theme, home, appHome, readTextFile, writeTextFile, props, closeOverlay, run, updates } from "herdr";
 
 // Прокрутка с тонким полупрозрачным ползунком (2 px). Ширину встроенной полосы gpui задать не даёт, а смещение не отдаёт,
 // поэтому прокрутка своя, как в ленте чата: колесо и трекпад двигают содержимое, ползунок рисуется по тем же числам.
@@ -61,6 +61,10 @@ export default class Settings extends View {
       try { this.cfg = { groups: [], projects: {}, ...JSON.parse((await readTextFile(CONFIG())) ?? "{}") }; } catch {}
       try { this.known = JSON.parse((await readTextFile(KNOWN())) ?? "{}") ?? {}; } catch {}
       try { this.chat = JSON.parse((await readTextFile(CHAT())) ?? "{}") ?? {}; } catch {}
+      // Своя модель агента, если он её где-то задал: её и возьмёт новый чат, когда здесь ничего не выбрано.
+      this.own = {};
+      try { this.own.codex = (await readTextFile(`${home()}/.codex/config.toml`))?.match(/^model\s*=\s*"([^"]+)"/m)?.[1] ?? null; } catch {}
+      try { this.own.claude = JSON.parse((await readTextFile(`${home()}/.claude/settings.json`)) ?? "{}")?.model ?? null; } catch {}
       this.models = {};
       for (const a of Object.keys(AGENTS)) { try { this.models[a] = JSON.parse((await readTextFile(MODELS(a))) ?? "[]") ?? []; } catch {} }
       if (this.newGroupFor) this.edit("+group", "", cx);
@@ -225,7 +229,12 @@ export default class Settings extends View {
     const modelRow = (a) => {
       const list = this.models?.[a] ?? [];
       const cur = this.chat?.[a]?.model ?? null;
-      const label = cur ? list.find((m) => m.value === cur)?.label ?? cur : "Как решит агент";
+      const own = this.own?.[a] ?? null;
+      const ownLabel = own ? list.find((m) => m.value.endsWith(`/${own}`))?.label ?? own : null;
+      // Ничего не выбрано: модель из настроек самого агента (её имя, если агент задал), иначе его встроенная.
+      const auto = ownLabel ? `Как у агента: ${ownLabel}` : "Как у агента";
+      const autoHint = own ? (a === "codex" ? "~/.codex/config.toml" : "~/.claude/settings.json") : "встроенная модель агента";
+      const label = cur ? list.find((m) => m.value === cur)?.label ?? cur : auto;
       const open = this.modelOpen === a;
       const logo = LOGO[a] ? image(`${ICONS}/${LOGO[a]}.svg`).size(16).flex_none() : icon("bot", 16);
       const pick = (value) => (cx) => { this.modelOpen = null; this.setModel(a, value, cx); };
@@ -247,7 +256,7 @@ export default class Settings extends View {
           : div().text_size(12).text_color(t.dim).child("Список появится после первого чата"));
       if (!open) return line;
       return v_flex().child(line).child(v_flex().ml(34).mr(8).mb(8).p(4).rounded(8).border(1).border_color(t.border).bg(t.chrome)
-        .child(option("none", "Как решит агент", "по умолчанию у агента", null))
+        .child(option("none", auto, autoHint, null))
         .child(div().h(1).mx(6).my(4).bg(t.border))
         .children(list.map((m) => option(m.value, m.label, m.value.replace(/^[^/]*\//, ""), m.value))));
     };
