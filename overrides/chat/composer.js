@@ -193,20 +193,41 @@ export class Composer {
     let shown = "";
     const show = async (cx) => {
       const text = await fs.readFile(`${base}.txt`, "utf8").catch(() => "");
+      const lvl = await fs.readFile(`${base}.lvl`, "utf8").catch(() => "");
+      if (lvl !== this.levelsRaw) { this.levelsRaw = lvl; this.levels = lvl ? lvl.split(",").map(Number) : []; cx.notify(); }
       if (text !== shown) { shown = text; this.set(glue(text)); cx.notify(); }
     };
     this.dict = "rec"; this.dictErr = null;
     cx.notify();
     const RUN = 'n=$(ls -d "$HOME"/.nvm/versions/node/*/bin/node 2>/dev/null | tail -1); exec "${n:-node}" "$0" "$@"';
-    const tick = cx.timer.every(250, (cx) => { cx.spawn(show); });
+    const tick = cx.timer.every(100, (cx) => { cx.spawn(show); });
     cx.spawn(async (cx) => {
       await exec("sh", ["-c", RUN, `${appHome()}/mods/ygg-new/dictate.mjs`, base], { timeout: 16 * 60000 }).catch(() => {});
       tick.cancel();
       await show(cx);
       this.dictErr = await fs.readFile(`${base}.err`, "utf8").catch(() => null);
-      this.dict = null;
+      this.dict = null; this.levels = []; this.levelsRaw = "";
       cx.notify();
     });
+  }
+
+  // «+» как у Claude: системный выбор файлов; картинки встают превью, остальное — @путь в тексте (как при перетаскивании).
+  pick(c, cx) {
+    cx.spawn(async (cx) => {
+      const r = await exec("osascript", ["-e", 'set fs to choose file with multiple selections allowed', "-e", 'set out to ""', "-e",
+        'repeat with f in fs', "-e", 'set out to out & POSIX path of f & linefeed', "-e", 'end repeat', "-e", 'out'], { timeout: 10 * 60000 }).catch(() => null);
+      const paths = (r?.stdout ?? "").split("\n").map((x) => x.trim()).filter(Boolean);
+      if (paths.length) c.drop?.(paths, cx);
+    });
+  }
+
+  // Волна диктовки, как в Claude: точки по громкости последних секунд, новые справа.
+  wave(t) {
+    const lv = this.levels ?? [];
+    const pad = Array(Math.max(0, 48 - lv.length)).fill(0).concat(lv);
+    return h_flex().id("dictate-wave").h(20).gap(3).items_center().flex_none()
+      .children(pad.map((v, i) => div().w(3).rounded(2).bg(v > 0.04 ? t.foreground : t.dim).h(Math.max(3, Math.round(3 + v * 15)))
+        .opacity(v > 0.04 ? 0.55 + v * 0.45 : 0.6)));
   }
 
   // `pending`: a dropped file the host is still copying (main.js attachImage); it gets the thumbnail's box.
@@ -309,33 +330,39 @@ export class Composer {
     });
     let wrap = div().id("composer-box").w_full().min_w(0).key_context(this.context());
     for (const a of ACTIONS) wrap = wrap.on_action(a, (_e, cx) => c.action(a, cx));
-    wrap = wrap.child(Textarea.new(this.ta).w_full().px(14).pt(12).pb(4).text_size(14).text_color(t.foreground).bg(alpha(t.background, 0))
+    wrap = wrap.child(Textarea.new(this.ta).w_full().px(6).pt(10).pb(8).text_size(14.5).text_color(t.foreground).bg(alpha(t.background, 0))
       .token((tok, _cx) => skillPillEl(tok, t)));
     const working = c.working;
     const typed = Boolean(this.value.trim() || this.chips.length);
     const stop = working && !typed;
-    const btn = h_flex().id(stop ? "stop" : "send").flex_none().w(30).h(30).rounded(10).items_center().justify_center().cursor_pointer()
-      .bg(stop ? t.foreground : typed ? t.solid : t.raised)
-      .text_color(stop ? t.background : typed ? t.solid_foreground : t.dim)
-      .hover((s) => s.opacity(0.85))
+    // Как блок ввода Claude: залитая карточка, «+» слева, справа ↵ и микрофон; превью вложений сверху.
+    const round = (id) => h_flex().id(id).flex_none().size(32).rounded(10).items_center().justify_center().cursor_pointer();
+    const plus = round("attach").text_color(t.muted).hover((s) => s.bg(t.hover).text_color(t.foreground))
+      .tooltip("Приложить файлы. Клик — выбрать").on_click((_e, cx) => this.pick(c, cx)).child(icon("plus", 18));
+    const btn = round(stop ? "stop" : "send")
+      .when(stop, (e) => e.bg(t.foreground).text_color(t.background))
+      .when(!stop, (e) => e.text_color(typed ? t.foreground : t.dim).hover((s) => s.bg(t.hover)))
       .tooltip(stop ? `Stop (Esc${keyHint("stop") ? ` · ${keyHint("stop")}` : ""})` : working ? "Steer (Enter)" : "Send (Enter)")
       .on_click((_e, cx) => c.action(stop ? "herdrchat_stop" : "herdrchat_enter", cx))
-      .child(icon(stop ? "square" : "arrow-up", stop ? 11 : 15));
+      .child(icon(stop ? "square" : "corner-down-left", stop ? 11 : 17));
     const rec = this.dict === "rec", busy = this.dict === "busy";
-    const mic = h_flex().id("dictate").flex_none().w(30).h(30).rounded(10).items_center().justify_center().cursor_pointer()
-      .when(rec, (e) => e.bg(alpha(t.error ?? "#f87168", 0.18)).text_color(t.error ?? "#f87168").loop("opacity", { from: 0.55, to: 1, period: 1100 }))
+    const mic = round("dictate")
+      .when(rec, (e) => e.bg(alpha(t.accent, 0.22)).text_color(t.accent))
       .when(!rec, (e) => e.text_color(this.dictErr ? (t.error ?? "#f87168") : t.muted).hover((s) => s.bg(t.hover).text_color(t.foreground)))
       .tooltip(rec ? "Идёт запись. Клик — остановить и вставить текст" : busy ? "Распознаю речь" : this.dictErr ?? "Надиктовать. Клик — начать запись")
       .on_click((_e, cx) => this.dictate(cx))
-      .child(busy ? spinner(14, t.muted) : icon(rec ? "square" : "mic", rec ? 11 : 15));
-    return v_flex().w_full().rounded(14).border_1().border_color(this.focused ? alpha(t.accent, 0.55) : t.input).bg(t.surface)
-      .when(this.focused, (e) => e.shadow_sm())
-      .child(wrap)
-      .when(chips.length > 0, (e) => e.child(h_flex().px(12).pb(6).gap(6).flex_wrap().children(chips)))
-      .child(h_flex().h(42).pl(8).pr(6).gap(4).items_center()
-        .child(h_flex().flex_1().min_w(0).gap(2).items_center().overflow_hidden().child(c.footer ?? div())) // clips, never under the button
-        .child(mic)
-        .child(btn));
+      .child(busy ? spinner(14, t.muted) : icon("mic", 17));
+    return v_flex().w_full().rounded(18).border_1().bg(t.input)
+      .border_color(alpha(t.foreground, this.focused ? 0.16 : 0.07))
+      .when(chips.length > 0, (e) => e.child(h_flex().px(14).pt(12).gap(8).flex_wrap().children(chips)))
+      .child(h_flex().w_full().pl(8).pr(8).py(6).gap(4).items_end()
+        .child(h_flex().h(36).items_center().child(plus))
+        .child(wrap.flex_1())
+        .child(h_flex().h(36).gap(2).items_center().child(btn).child(mic)))
+      // Пока идёт запись, вместо чипов модели бежит волна (как у Claude); чипы не дублируются отдельной строкой.
+      .child(h_flex().h(34).pl(14).pr(10).gap(4).items_center().border_t(1).border_color(alpha(t.foreground, 0.05))
+        .when(rec || busy, (e) => e.child(this.wave(t)).child(div().flex_1()))
+        .when(!(rec || busy), (e) => e.child(h_flex().flex_1().min_w(0).gap(2).items_center().overflow_hidden().child(c.footer ?? div()))));
   }
 }
 

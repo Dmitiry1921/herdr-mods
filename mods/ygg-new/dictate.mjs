@@ -17,7 +17,7 @@ const MODEL = `${H}/.cache/whisper-cpp/ggml-large-v3-turbo.bin`;
 const RATE = 16000, BYTES = 2; // моно, 16 бит
 const sleep = (/** @type {number} */ ms) => new Promise((r) => setTimeout(r, ms));
 const put = (ext, s) => { fs.writeFileSync(`${base}.${ext}.tmp`, s); fs.renameSync(`${base}.${ext}.tmp`, `${base}.${ext}`); };
-for (const e of ["pcm", "txt", "stop", "done", "err"]) fs.rmSync(`${base}.${e}`, { force: true });
+for (const e of ["pcm", "txt", "stop", "done", "err", "lvl"]) fs.rmSync(`${base}.${e}`, { force: true });
 
 const port = 47600 + Math.floor(Math.random() * 300);
 const server = spawn("whisper-server", ["-m", MODEL, "-l", "ru", "--host", "127.0.0.1", "--port", String(port)], { env, stdio: "ignore" });
@@ -30,6 +30,7 @@ const end = (err) => {
   try { server.kill(); } catch {}
   try { mic.kill("SIGINT"); } catch {}
   fs.rmSync(`${base}.pcm`, { force: true });
+  fs.rmSync(`${base}.lvl`, { force: true });
   put("done", "1");
   process.exit(0);
 };
@@ -54,6 +55,22 @@ async function hear() {
   const text = (await r.text()).replace(/\[[^\]]*\]/g, "").replace(/\s+/g, " ").trim();
   return { len: pcm.length, text };
 }
+
+// Громкость для волны под полем ввода: раз в 80 мс RMS последних 50 мс записи, последние 48 значений 0..1 в <base>.lvl.
+const levels = [];
+setInterval(() => {
+  try {
+    const fd = fs.openSync(`${base}.pcm`, "r");
+    try {
+      const size = fs.fstatSync(fd).size, n = Math.min(size - (size % BYTES), RATE * BYTES * 0.05);
+      const b = Buffer.alloc(n); fs.readSync(fd, b, 0, n, size - (size % BYTES) - n);
+      let sum = 0; for (let i = 0; i < n; i += 2) { const v = b.readInt16LE(i) / 32768; sum += v * v; }
+      levels.push(Math.min(1, Math.sqrt(sum / Math.max(1, n / 2)) * 6));
+    } finally { fs.closeSync(fd); }
+  } catch { levels.push(0); }
+  if (levels.length > 48) levels.shift();
+  try { put("lvl", levels.map((x) => x.toFixed(2)).join(",")); } catch {}
+}, 80).unref();
 
 // Модель грузится около секунды: пока её нет, запись уже идёт.
 let up = false;

@@ -2202,7 +2202,7 @@ export default class HerdrChat extends View {
     const hintText = this.flashText?.text ?? (s.dialog ? (s.dialog.method === "permission" ? "Answer above · Esc denies" : "Answer above · Esc cancels") : working
       ? [sendKey && `${sendKey} ${s.capabilities?.steer === false ? "queues" : "steers"}`, followKey && `${followKey} after this run`, "Esc stops"].filter(Boolean).join(" · ")
       : this.composer.focused && !this.composer.value ? [sendKey && `${sendKey} sends`, "Shift+Enter new line", "/ commands", "@ files", this.peekMode && "Esc closes"].filter(Boolean).join(" · ") : null);
-    const composer = Popup.new("composer-anchor", this.composer.view(t, { ...c, working, footer, action: (a, cx) => this.action(a, cx) }))
+    const composer = Popup.new("composer-anchor", this.composer.view(t, { ...c, working, footer, action: (a, cx) => this.action(a, cx), drop: (p, cx) => this.drop(p, cx) }))
       .anchor("bottom_left").w_full()
       .when(Boolean(menu), (e) => e.content(div().w(this.colW()).pb(8).child(menu)));
     // Its height is in the dump: an open menu must not change it (an overlay, not the flow).
