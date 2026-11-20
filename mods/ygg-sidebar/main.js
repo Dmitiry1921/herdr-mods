@@ -622,8 +622,7 @@ export default class YggSidebar extends View {
     const s = ss.find((x) => !x.machine) ?? ss[0];
     const folded = !this.popup && this.folded.has(key);
     const all = ss.flatMap((sp) => (sp.tabs ?? []).filter((tab) => !this.pins.has(`s:${tab.id}`)).map((tab) => ({ s: sp, tab, info: this.session(tab, tabTerms, ps, kids) })));
-    // Свой порядок, если его задали перетаскиванием; иначе сначала те, кто ждёт и работает.
-    all.sort((a, b) => (RANK[b.info.status] ?? 0) - (RANK[a.info.status] ?? 0));
+    // Свой порядок, если его задали перетаскиванием; иначе в порядке появления вкладок.
     const items = byOrder(all, this.sorder[key] ?? [], (i) => i.tab.id);
     if (!this.sorder[key]?.length) this.sorder[key] = items.map((i) => i.tab.id);
     else for (const i of items) if (!this.sorder[key].includes(i.tab.id)) this.sorder[key].push(i.tab.id);
@@ -667,9 +666,11 @@ export default class YggSidebar extends View {
     // Начатые вне Herdr за последние сутки — сразу после работающих, раньше своих спящих: новое видно без «Показать больше».
     const roots = ext.filter((x) => !nested.has(x));
     const day = Date.now() - 86400000, fresh = roots.filter((x) => x.ext.at > day);
-    const every = [...items.filter((i) => i.info.status), ...fresh, ...items.filter((i) => !i.info.status), ...roots.filter((x) => x.ext.at <= day)];
-    let room = Math.max(0, limit - items.filter((i) => i.info.status).length);
-    const shown = open ? every : every.filter((i) => i.info?.status || room-- > 0);
+    // Порядок не зависит от статуса: сессия, которая заработала или уснула, остаётся на месте, а не прыгает вверх и обратно
+    // (пользователь, 21.11.2026). Работающие и свежие внешние видны всегда, остальные добирают до N.
+    const every = [...items, ...fresh, ...roots.filter((x) => x.ext.at <= day)];
+    let room = Math.max(0, limit - items.filter((i) => i.info.status).length - fresh.length);
+    const shown = open ? every : every.filter((i) => i.info?.status || (i.ext && i.ext.at > day) || room-- > 0);
     const hidden = every.length - shown.length;
     const more = !this.popup && (open || hidden > 0) ? [div().id(`more-${key}`).ml(4).mt(2).mb(4).px(8).h(24).flex().items_center().self_start().rounded(6)
       .text_size(12).text_color(t.dim).bg(t.hover).cursor_pointer().hover((st) => st.text_color(t.foreground))
