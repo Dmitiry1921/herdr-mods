@@ -265,27 +265,30 @@ export function tool(it, c) {
   const open = c.expanded.has(it.id);
   const title = toolTitle(it, d, c);
   const added = d.added ?? null, removed = d.removed ?? null;
-  const head = h_flex().id(`tool-${it.id}`).h(34).px(10).gap(8).items_center().cursor_pointer()
+  // ygg: строка команды как в Codex и Claude: без карточки в рамке, значок статуса только у работающей и упавшей;
+  // вывод по клику, в рамке под строкой.
+  const head = h_flex().id(`tool-${it.id}`).h(28).px(6).gap(8).items_center().rounded(6).cursor_pointer()
     .hover((s) => s.bg(t.hover)).on_click((_e, cx) => c.toggle(it.id, cx))
     .child(icon(TOOL_ICON[d.type] ?? "wrench", 13).text_color(t.dim))
     .child(title)
     .when(d.type === "edit" && (added != null || removed != null), (e) => e.child(h_flex().flex_none().gap(6).font_family(c.mono).text_size(11.5)
       .child(div().text_color(t.ansi2).child(`+${added ?? 0}`)).child(div().text_color(t.ansi1).child(`−${removed ?? 0}`))))
     .when(d.type === "bash" && d.exitCode != null && d.exitCode !== 0, (e) => e.child(chip(`exit ${d.exitCode}`, t.ansi1, t)))
-    .when(it.durationMs != null && it.durationMs >= 100, (e) => e.child(div().flex_none().text_size(11).text_color(t.dim).child(duration(it.durationMs))))
-    .child(statusIcon(it.status, t));
+    .when(it.durationMs != null && it.durationMs >= 1000, (e) => e.child(div().flex_none().text_size(11).text_color(t.dim).child(duration(it.durationMs))))
+    .when(it.status !== "done", (e) => e.child(statusIcon(it.status, t, 12)));
   let body = null;
   if (open) body = toolBody(it, d, c);
   else if (it.status === "running" && it.output) {
     // Running: the output's last lines, so a long command shows life.
     const lines = it.outputLines?.length ? it.outputLines.slice(-4) : asLines(it.output).slice(-4);
-    body = div().border_t_1().border_color(c.line).px(10).py(6).child(outputBox(`${it.id}-tail`, lines, c, { color: t.dim }));
+    body = div().px(10).py(6).child(outputBox(`${it.id}-tail`, lines, c, { color: t.dim }));
   }
-  return v_flex().rounded(10).overflow_hidden().border_1()
-    .border_color(it.status === "error" ? alpha(t.ansi1, 0.45) : it.status === "declined" ? alpha(t.blocked, 0.45) : t.border).bg(t.surface)
-    .child(head).children(body ? [body] : [])
-    .when(it.status === "declined", (e) => e.child(div().border_t_1().border_color(c.line).px(10).py(5).text_size(11.5).text_color(t.blocked).child("Declined: not run")))
-    .children(it.images?.length ? [div().px(10).pb(10).child(images(it.images, it.imageSizes, it.id, c))] : []);
+  const under = (el) => div().ml(27).mt(2).mb(6).rounded(8).overflow_hidden().border_1()
+    .border_color(it.status === "error" ? alpha(t.ansi1, 0.35) : t.border).bg(t.surface).child(el);
+  return v_flex()
+    .child(head).children(body ? [under(body)] : [])
+    .when(it.status === "declined", (e) => e.child(div().ml(33).pb(4).text_size(11.5).text_color(t.blocked).child("Declined: not run")))
+    .children(it.images?.length ? [div().ml(27).pb(8).child(images(it.images, it.imageSizes, it.id, c))] : []);
 }
 
 function toolBody(it, d, c) {
@@ -293,7 +296,7 @@ function toolBody(it, d, c) {
   const fullText = c.full.get(it.id);
   const out = fullText ?? it.output ?? "";
   const truncated = it.outputTruncated && fullText == null;
-  const box = v_flex().border_t_1().border_color(c.line).px(10).py(8).gap(8).max_w_full();
+  const box = v_flex().px(10).py(8).gap(8).max_w_full();
   const parts = [];
   if (d.type === "bash") {
     parts.push(h_flex().gap(8).font_family(c.mono).text_size(12.5).line_height("19px")
@@ -328,19 +331,24 @@ function group(r, c) {
   const s = groupSummary(r.items);
   const open = c.groupOpen(r.id) ?? defaultOpen(r);
   const members = groupCards(r, open, c.children);
-  const head = h_flex().id(`grp-${r.id}`).h(30).px(6).gap(7).items_center().rounded(8).cursor_pointer()
-    .text_size(12.5).text_color(t.muted).hover((x) => x.bg(t.hover).text_color(t.foreground))
+  // ygg: заголовок группы как в Codex: «Ran 6 commands ›» тихим текстом, стрелка после; значок только у работающей,
+  // упавшей или отклонённой группы.
+  const head = h_flex().id(`grp-${r.id}`).h(28).px(6).gap(6).items_center().self_start().rounded(6).cursor_pointer()
+    .text_size(12.5).text_color(t.dim).hover((x) => x.bg(t.hover).text_color(t.muted))
     .on_click((_e, cx) => c.toggle(r.id, cx))
-    .child(icon(open ? "chevron-down" : "chevron-right", 12).text_color(t.dim))
     .child(div().flex_none().max_w_full().truncate().child(s.text))
     .when(s.ms != null && s.ms >= 1000 && !s.running, (e) => e.child(div().flex_none().text_size(11.5).text_color(t.dim).child(duration(s.ms))))
-    .child(statusIcon(s.failed ? "error" : s.declined ? "declined" : s.running ? "running" : "done", t, 12));
+    .child(icon(open ? "chevron-down" : "chevron-right", 12).text_color(t.dim))
+    .when(s.failed || s.declined || s.running, (e) => e.child(statusIcon(s.failed ? "error" : s.declined ? "declined" : "running", t, 12)));
   // Opening and closing animate the cards' height (main.js `groupAnim`):
   // an explicit height that changes once, with a native transition.
   const anim = c.groupAnim(r.id);
-  const shownMembers = anim?.target === "close" ? r.items : members;
+  // ygg: короткие раздумья между командами («Thought for 1s») в группе не показываем, видны идущее и долгое (от 10 с).
+  const shownMembers = (anim?.target === "close" ? r.items : members)
+    .filter((m) => m.kind !== "thinking" || m.streaming || (m.durationMs ?? 0) >= 10000);
   let body = shownMembers.length
-    ? v_flex().id(`grp-cards-${r.id}`).flex_none().gap(SPACE.card).pt(SPACE.card).on_size_change((sz, cx) => c.groupMeasured(r.id, sz.height, cx))
+    ? v_flex().id(`grp-cards-${r.id}`).flex_none().ml(8).mt(2).pl(8).border_l_1().border_color(t.border)
+      .on_size_change((sz, cx) => c.groupMeasured(r.id, sz.height, cx))
       .children(shownMembers.map((m) => (m.kind === "thinking" ? thinking(m, c) : tool(m, c))))
     : null;
   if (body && anim) {
@@ -401,8 +409,8 @@ function agentCard(it, d, c) {
     .when(Boolean(d.agentType), (e) => e.child(chip(d.agentType, t.muted, t)))
     .child(h_flex().flex_none().gap(4).items_center().text_size(11.5).text_color(t.dim)
       .child(plural(kids.length, "step")).child(icon(open ? "chevron-down" : "chevron-right", 11)))
-    .when(it.durationMs != null && it.durationMs >= 100, (e) => e.child(div().flex_none().text_size(11).text_color(t.dim).child(duration(it.durationMs))))
-    .child(statusIcon(it.status, t));
+    .when(it.durationMs != null && it.durationMs >= 1000, (e) => e.child(div().flex_none().text_size(11).text_color(t.dim).child(duration(it.durationMs))))
+    .when(it.status !== "done", (e) => e.child(statusIcon(it.status, t, 12)));
   let body = null;
   if (open && kids.length) {
     body = v_flex().border_t_1().border_color(c.line).pl(12).pr(8).py(8).gap(6)

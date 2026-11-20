@@ -493,7 +493,7 @@ export default class YggSidebar extends View {
     const ts = tabTerms.get(tab.id) ?? [];
     const mine = ps.filter((p) => p.tab === tab.id);
     const chatPane = mine.find((p) => p.mod === "chat");
-    let kind = null, parked = null, cwd = null, chatId = null;
+    let kind = null, parked = null, cwd = null, chatId = null, title = null;
     for (const t of ts) {
       const l = t?.labels ?? {};
       // Вкладки, запаркованные без меток (codex1), узнаются по команде: codex resume / claude --resume.
@@ -503,6 +503,8 @@ export default class YggSidebar extends View {
       // Codex, проснувшийся в терминале (codex resume <id>), тоже знает свой тред: по нему откроется чат.
       parked ??= l["ygg.parked"] ?? (kind === "codex" ? argv.match(/\bresume\b.*?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/)?.[1] : null) ?? null;
       chatId ??= l["herdr-chat.chat"] ?? null;
+      // Запаркованная сессия несёт своё название в команде: sh -c <скрипт> <id> <название>.
+      if (l["ygg.parked"] && t?.argv?.[3] === l["ygg.parked"]) title ??= t.argv[4] || null;
       cwd ??= t?.cwd ?? null;
     }
     if (!kind && chatPane) kind = AGENT[tab.name?.toLowerCase()] ?? "claude";
@@ -510,7 +512,7 @@ export default class YggSidebar extends View {
     const status = st === "error" ? "blocked" : st;
     const subs = ts.flatMap((t) => kids.get(t.address) ?? []);
     chatId ??= chatPane?.props?.chat ?? null;
-    return { kind, status, parked: !status && parked ? parked : null, sleepId: parked, chatId, cwd, subs, chat: Boolean(chatPane) };
+    return { kind, status, parked: !status && parked ? parked : null, sleepId: parked, chatId, cwd, subs, chat: Boolean(chatPane), title };
   }
   // Чат Codex сервера живёт во вкладке на этом Mac: herdr-chat находит свою вкладку только в раскладке
   // этого Mac. Вкладка встаёт в здешнее пространство того же проекта (его нет — заводится). Пространство
@@ -602,6 +604,18 @@ export default class YggSidebar extends View {
           .child(div().absolute().left(0).top(STUB).w(10).h(1).bg(LINE));
   }
 
+  // Вкладка с именем-номером («1») или id вместо названия: название сессии, если оно известно. Herdr называет вкладку
+  // номером, когда её создали без имени; переименовываем один раз, чтобы и заголовок чата был нормальным.
+  tabName(tab, info) {
+    if (tab.name && !/^\d+$/.test(tab.name) && !UUID.test(tab.name)) return tab.name;
+    const d = shared("ygg.ext");
+    const id = info.sleepId;
+    const title = info.title ?? (id && [...(d?.mac?.items ?? []), ...Object.values(d?.machines ?? {}).flatMap((m) => m?.items ?? [])].find((e) => e.id === id)?.title) ?? null;
+    if (!title) return tab.name;
+    if (!this.popup && !this.menu && !this.smenu && !(this.renamed ??= new Set()).has(tab.id)) { this.renamed.add(tab.id); run("tab.rename", { id: tab.id, name: title.slice(0, 60) }); }
+    return title;
+  }
+
   sessionNode(s, tab, info, last, t, flat = false) {
     const remote = Boolean(s.machine);
     const sleeping = !info.status;
@@ -614,7 +628,7 @@ export default class YggSidebar extends View {
         at: { x: e.position?.x ?? 40, y: e.position?.y ?? 80 }, props: { smenu: { tab: tab.id, space: s.id } } }))
       .on_hover((h, cx) => { this.hovered = h ? pkey : this.hovered === pkey ? null : this.hovered; cx.notify(); }), "s", tab.id, flat ? "__pins" : s.name, () => this.open(s, tab, info))
       .child(div().flex_none().when(sleeping, (el) => el.opacity(0.55)).child(this.agentIcon(info.kind, t)))
-      .child(div().flex_1().min_w(0).truncate().text_color(sleeping ? t.dim : t.foreground).child(label(tab.name, info.kind)))
+      .child(div().flex_1().min_w(0).truncate().text_color(sleeping ? t.dim : t.foreground).child(label(this.tabName(tab, info), info.kind)))
       .when(flat, (el) => el.child(div().flex_none().max_w(90).truncate().text_size(11).text_color(t.dim).child((this.cfg.projects?.[s.name]?.alias) ?? s.name)))
       .when(remote && !flat, (el) => el.child(this.machineMark(s.machine, t)))
       .child(this.slot(this.mark(info, remote, t)))
