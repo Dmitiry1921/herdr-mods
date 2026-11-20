@@ -7,12 +7,12 @@ import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, ScrollHandle, Scrollbar } from "gpui-base";
 import { spaces, terminals, panes, props, shared, setShared, theme, appHome, exec, layout, run } from "herdr";
 
-// Тонкая полоса прокрутки (3 px) вместо широкой встроенной: область прокручивается сама (overflow_y_scroll),
+// Тонкая полупрозрачная полоса прокрутки (2 px) вместо широкой встроенной: область прокручивается сама (overflow_y_scroll),
 // полоса — Scrollbar того же id в узкой колонке справа (он заполняет свой контейнер).
 const thin = (id, el, fill) => div().relative().w_full().flex().flex_col()
   .when(fill === "full", (d) => d.size_full().min_h(0)).when(fill === true, (d) => d.flex_1().min_h(0))
   .child(el)
-  .child(Scrollbar.vertical(id).absolute().top(2).bottom(2).right(0).w(3));
+  .child(Scrollbar.vertical(id).absolute().top(2).bottom(2).right(0).w(2).opacity(0.5));
 
 const ICONS = "mods/ygg-panel/icons";
 // Семантика Yggdrasil: синий — идёт работа, жёлтый — упёрлись, зелёный — добавлено.

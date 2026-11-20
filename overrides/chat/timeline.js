@@ -114,7 +114,7 @@ export class Timeline {
       .when(!this.sticky && total > this.viewH && Boolean(thumb), (e) => {
         const h = Math.max(28, (this.viewH * this.viewH) / total);
         const y = ((this.viewH - h) * this.top) / Math.max(1, total - this.viewH);
-        return e.child(div().absolute().right(2).top(y).w(3).h(h).rounded(2).bg(thumb)); // ygg: тонкая полоса, 3 px
+        return e.child(div().absolute().right(2).top(y).w(2).h(h).rounded(1).bg(thumb).opacity(0.5)); // ygg: тонкая полупрозрачная полоса, 2 px
       });
   }
 }
