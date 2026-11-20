@@ -2,16 +2,18 @@
 // показывала их рядом со своими и открывала здесь.
 //   node external.mjs [машина…]   → {"mac": {items, known}, "machines": {"<имя>": {items}}}
 //   node external.mjs --here      → {items, known} этой машины (так скрипт гоняется на сервере через hc exec)
-// items: {kind, id, title, cwd, at, busy}. busy — сессия сейчас открыта приложением Claude (процесс с её id).
-// known: id сессий, уже открытых чатом Herdr (состояния herdr-chat): их панель и так показывает.
+// items: {kind, id, title, cwd, at, busy, parent}. busy — сессия сейчас открыта приложением Claude (процесс с её id);
+// parent — id сессии Claude, из которой эта запущена (боковые сессии), панель вкладывает её под родителя.
+// known: [{chat, id}] сессии чатов Herdr (состояния herdr-chat). Панель прячет только те, чья вкладка сейчас открыта:
+// состояние остаётся и после закрытия вкладки (⌘W), а сессия должна вернуться в список.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 
 const H = os.homedir();
-const DAYS = 7; // ponytail: старше недели не показываем; понадобится вся история — параметр в projects.json
-const since = Date.now() - DAYS * 86400000;
+// Все неархивные сессии, как в списках Codex и Claude: лишнее панель прячет под «Показать больше».
+const since = 0;
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 
 // Название треда Codex: имя, которое дал Codex, иначе первая строка запроса без служебной шапки про вложения.
@@ -42,7 +44,7 @@ function claude() {
   let ps = "";
   try { ps = execFileSync("ps", ["-axo", "command"], { maxBuffer: 1 << 24 }).toString(); } catch {}
   const running = new Set([...ps.matchAll(/--(?:resume|session-id)[= ]([0-9a-f-]{36})/g)].map((m) => m[1]));
-  const out = [];
+  const out = [], cli = new Map();
   for (const a of fs.readdirSync(root)) for (const b of fs.readdirSync(path.join(root, a)).filter((x) => !x.startsWith("."))) {
     const dir = path.join(root, a, b);
     if (!fs.statSync(dir).isDirectory()) continue;
@@ -50,11 +52,13 @@ function claude() {
       try {
         const s = JSON.parse(fs.readFileSync(path.join(dir, f), "utf8"));
         const at = s.lastActivityAt ?? s.createdAt ?? 0;
+        if (s.cliSessionId) cli.set(s.sessionId, s.cliSessionId);
         if (s.isArchived || at < since || !s.cliSessionId || !s.cwd) continue;
-        out.push({ kind: "claude", id: s.cliSessionId, title: s.title || "Без названия", cwd: s.cwd, at, busy: running.has(s.cliSessionId) });
+        out.push({ kind: "claude", id: s.cliSessionId, title: s.title || "Без названия", cwd: s.cwd, at, busy: running.has(s.cliSessionId), from: s.spawnedFrom?.sessionId ?? null });
       } catch {}
     }
   }
+  for (const e of out) { e.parent = cli.get(e.from) ?? null; delete e.from; }
   return out;
 }
 
@@ -83,16 +87,16 @@ function dsh() {
 
 function known() {
   const dir = path.join(H, ".config/herdr-app/data/herdr-chat/chats");
-  const ids = new Set();
+  const out = [];
   try {
     for (const f of fs.readdirSync(dir).filter((x) => x.endsWith(".json"))) {
       try {
         const s = JSON.parse(fs.readFileSync(path.join(dir, f), "utf8"));
-        for (const v of [s.sessionFile, s.session, s.sessionId, s.threadId]) { const m = String(v ?? "").match(UUID); if (m) ids.add(m[0]); }
+        for (const v of [s.sessionFile, s.session, s.sessionId, s.threadId]) { const m = String(v ?? "").match(UUID); if (m) out.push({ chat: s.chat, id: m[0] }); }
       } catch {}
     }
   } catch {}
-  return [...ids];
+  return out;
 }
 
 const here = () => {

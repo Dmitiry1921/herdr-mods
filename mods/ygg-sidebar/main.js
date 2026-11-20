@@ -142,7 +142,7 @@ export default class YggSidebar extends View {
       try {
         const r = await exec("sh", ["-c", RUN, EXTERNAL(), ...ms], { timeout: 60000 });
         const d = JSON.parse(r.stdout || "null");
-        if (d) { const old = shared("ygg.ext"); for (const m of ms) if (!d.machines[m] && old?.machines?.[m]) d.machines[m] = old.machines[m]; setShared("ygg.ext", d); cx.notify(); }
+        if (d) { this.opening?.clear(); const old = shared("ygg.ext"); for (const m of ms) if (!d.machines[m] && old?.machines?.[m]) d.machines[m] = old.machines[m]; setShared("ygg.ext", d); cx.notify(); }
       } catch {}
       this.scanning = false;
     });
@@ -152,7 +152,8 @@ export default class YggSidebar extends View {
   external(ss, taken) {
     const d = shared("ygg.ext");
     if (!d) return [];
-    const known = new Set([...(d.mac?.known ?? []), ...taken]);
+    // Чат Herdr прячет свою сессию, только пока его вкладка открыта; старый формат (строки) — как раньше.
+    const known = new Set([...(d.mac?.known ?? []).flatMap((k) => (typeof k === "string" ? [k] : this.openChats?.has(k.chat) ? [k.id] : [])), ...taken, ...(this.opening ?? [])]);
     const out = [], seen = new Set();
     for (const sp of ss) {
       const list = sp.machine ? d.machines?.[sp.machine]?.items : d.mac?.items;
@@ -165,6 +166,21 @@ export default class YggSidebar extends View {
     return out.sort((a, b) => b.ext.at - a.ext.at);
   }
 
+  // Вкладка открытого чата Herdr с этой сессией: выбрать её. false — такого чата нет.
+  goToChat(id) {
+    for (const k of shared("ygg.ext")?.mac?.known ?? []) {
+      if (typeof k === "string" || k.id !== id || !this.openChats?.has(k.chat)) continue;
+      const tab = panes().find((p) => p.props?.chat === k.chat)?.tab
+        ?? terminals().find((x) => x.labels?.["herdr-chat.chat"] === k.chat && x.labels?.["herdr.tab"])?.labels["herdr.tab"];
+      const s = tab && spaces().find((x) => (x.tabs ?? []).some((t) => t.id === tab));
+      if (!s) continue;
+      run("space.select", { id: s.id });
+      run("tab.select", { id: tab });
+      return true;
+    }
+    return false;
+  }
+
   // Открыть здесь сессию, начатую вне Herdr. Занятую приложением Claude — копией (форк), иначе два процесса
   // пишут в один файл сессии. Codex сервера — чатом во вкладке этого Mac, как и свои спящие.
   async openExternal(sp, e) {
@@ -173,6 +189,9 @@ export default class YggSidebar extends View {
     if (sp.machine) to = await this.hostSpace(sp);
     else if (!to) [to] = await this.ensure([sp]);
     if (!to) return;
+    // Уже открыта чатом здесь (список ещё не обновился) — перейти в ту вкладку, а не заводить второй чат на ту же сессию.
+    if (!sp.machine && this.goToChat(e.id)) return;
+    (this.opening ??= new Set()).add(e.id);
     run("space.select", { id: to });
     let session = e.id, name = e.title;
     if (e.busy && e.kind === "claude") {
@@ -632,9 +651,22 @@ export default class YggSidebar extends View {
     // Под своими — сессии этого проекта, начатые вне Herdr (свежие сверху): тоже под «Показать больше».
     const taken = all.flatMap((i) => [i.info.sleepId, i.info.parked].filter(Boolean));
     const ext = this.external(ss.filter((x) => !this.cfg.projects?.[x.name]?.noExternal), taken);
+    // Боковые сессии Claude — под родителем, как в Claude. Родитель — сессия списка или вкладка (спящая или чат).
+    const chatSid = new Map((shared("ygg.ext")?.mac?.known ?? []).filter((k) => typeof k !== "string").map((k) => [k.chat, k.id]));
+    const sid = (x) => (x.ext ? x.ext.id : x.info.sleepId ?? chatSid.get(x.info.chatId) ?? null);
+    const ids = new Set([...all.map(sid), ...ext.map(sid)].filter(Boolean));
+    const kidsOf = new Map();
+    for (const x of ext) if (x.ext.parent && x.ext.parent !== x.ext.id && ids.has(x.ext.parent)) kidsOf.set(x.ext.parent, [...(kidsOf.get(x.ext.parent) ?? []), x]);
+    const nested = new Set([...kidsOf.values()].flat());
+    const nest = (x, seen = new Set()) => {
+      const id = sid(x), list = id && !seen.has(id) ? kidsOf.get(id) ?? [] : [];
+      seen.add(id);
+      return list.length ? [v_flex().relative().ml(13).pl(STUB).children(list.map((k, i) => this.extNode(k.s, k.ext, i === list.length - 1, t).children(nest(k, seen))))] : [];
+    };
     // Начатые вне Herdr за последние сутки — сразу после работающих, раньше своих спящих: новое видно без «Показать больше».
-    const day = Date.now() - 86400000, fresh = ext.filter((x) => x.ext.at > day);
-    const every = [...items.filter((i) => i.info.status), ...fresh, ...items.filter((i) => !i.info.status), ...ext.filter((x) => x.ext.at <= day)];
+    const roots = ext.filter((x) => !nested.has(x));
+    const day = Date.now() - 86400000, fresh = roots.filter((x) => x.ext.at > day);
+    const every = [...items.filter((i) => i.info.status), ...fresh, ...items.filter((i) => !i.info.status), ...roots.filter((x) => x.ext.at <= day)];
     let room = Math.max(0, limit - items.filter((i) => i.info.status).length);
     const shown = open ? every : every.filter((i) => i.info?.status || room-- > 0);
     const hidden = every.length - shown.length;
@@ -643,7 +675,7 @@ export default class YggSidebar extends View {
       .on_click((_e, cx) => { open ? this.more.delete(key) : this.more.add(key); save("ygg.more", [...this.more]); cx.notify(); })
       .child(open ? "Свернуть" : "Показать больше")] : [];
     const body = folded || !every.length ? [] : [v_flex().relative().ml(13).pl(STUB)
-      .children(shown.map(({ s: sp, tab, info, ext: e }, i) => (e ? this.extNode(sp, e, i === shown.length - 1, t) : this.sessionNode(sp, tab, info, i === shown.length - 1, t)))), ...more];
+      .children(shown.map((x, i) => (x.ext ? this.extNode(x.s, x.ext, i === shown.length - 1, t) : this.sessionNode(x.s, x.tab, x.info, i === shown.length - 1, t)).children(nest(x)))), ...more];
     return v_flex().child(head).children(body);
   }
 
@@ -711,6 +743,7 @@ export default class YggSidebar extends View {
       }
       if (x.parent && x.state === "live") kids.set(x.parent, [...(kids.get(x.parent) ?? []), x]);
     }
+    this.openChats = new Set([...all.map((x) => x.labels?.["herdr-chat.chat"]), ...ps.map((p) => p.props?.chat)].filter(Boolean));
     for (const p of ps) if (p.terminal && !tabTerms.has(p.tab)) { const x = all.find((y) => y.address === p.terminal); if (x) tabTerms.set(p.tab, [x]); }
     const projects = this.cfg.projects ?? {};
     const groups = [...(this.cfg.groups ?? [])];
