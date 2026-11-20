@@ -3,12 +3,18 @@
 Моды для [Herdr](https://herdr.dev): одно окно для сессий Claude Code и Codex, локальных и на серверах.
 Вид и состояния сессий как в Yggdrasil: значки вместо подписей, подсказка при наведении «что это. Клик — что будет».
 
+![Herdr с раскладкой ygg](preview.png)
+
+*One Herdr window for every Claude Code and Codex session, local and remote: a project tree with live agent status,
+a Codex-style new-session dialog, a summary panel with context and limits. UI in Russian. Build brief: [RECIPE.md](RECIPE.md).*
+
 | Мод | Где | Что делает |
 |---|---|---|
 | `ygg-sidebar` | левая панель | Проекты и сессии всех машин: группы, закрепление, объединение проектов с разных машин под одним именем, проекты не пропадают, когда закрыта последняя сессия. Сессии, начатые вне Herdr (приложения Claude и Codex, Codex на сервере), видны в своём проекте и открываются здесь чатом; занятая приложением Claude открывается копией. Правый клик по сессии: переименовать, закрепить, форк, перенести в проект, скопировать команду продолжения или папку, архив. Правый клик по проекту: объединить, разъединить, архив сессий проекта |
 | `ygg-new` | окно «Новая сессия» | Агент, модель, режим, машина и папка в одной строке, первый ход отправляется сразу |
 | `ygg-settings` | окно настроек | Проекты левой панели без правки JSON |
 | `ygg-panel` | правая панель «Сводка» | Среда (машина, папка, ветка), контекст с разбивкой как в Claude, лимиты Claude и Codex, мои PR (GitHub, Bitbucket), хуки Codex, коннекторы. Разделы сворачиваются, перетаскиваются и закрепляются: закреплённые видны поверх сессии, когда панель скрыта |
+| `ygg-status` | нижняя строка | Лимиты Claude и Codex всегда на виду: полоска, процент, время до сброса; жёлтая только при перерасходе |
 | `ygg-tabs` | верхняя полоса | Заголовок текущей сессии вместо ряда вкладок, кнопки панелей значками |
 | `overrides/chat` | чат | Codex на сервере открывается чатом (нужен хост из форка [herdr-chat](https://github.com/Dmitiry1921/herdr-chat/tree/remote-codex-daemon), ветка `remote-codex-daemon`: путь к его `bin/herdr-chat-host` в `mods/chat/config.json` → `host`); чат Codex открывается, даже если Codex перенёс файл сессии; микрофон в поле ввода, текст набирается по ходу речи (нужны `ffmpeg`, `whisper-server` из whisper-cpp, мод `ygg-new` и модель `~/.cache/whisper-cpp/ggml-large-v3-turbo.bin`); свои сообщения в заметном пузыре |
 
@@ -18,14 +24,17 @@
 
 Нужны Herdr, Node.js 22+ (для служебных скриптов модов) и, для сессий Codex, `codex` в `PATH`.
 
+Проще всего попросить агента в Herdr: «Добавь раскладку github.com/Dmitiry1921/herdr-mods». Он прочитает
+[RECIPE.md](RECIPE.md) и поставит раскладку рядом с твоей, не трогая её. Или руками:
+
 ```sh
-git clone git@github.com:Dmitiry1921/herdr-mods.git
+git clone https://github.com/Dmitiry1921/herdr-mods.git
 cd herdr-mods && ./install.sh
 herdr-app do layout.switch '{"name":"ygg"}'
 ```
 
 Свои моды ставятся ссылками на клон: `git pull` обновляет их сразу. Правки встроенных модов копируются поверх,
-оригинал остаётся рядом как `.orig`. Папка Herdr по умолчанию `~/.config/herdr-app`, другая задаётся `HERDR_HOME`.
+оригинал остаётся рядом как `.orig`. Папка Herdr по умолчанию `~/.config/herdr-app`, другая задаётся `HERDR_APP_HOME`.
 
 ## Убрать
 

@@ -3,8 +3,8 @@
 # правки встроенных модов (overrides/) — копией поверх, оригинал сохраняется как .orig.
 set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
-HERDR=${HERDR_HOME:-$HOME/.config/herdr-app}
-[ -d "$HERDR/mods" ] || { echo "Нет $HERDR/mods: Herdr не запускался или HERDR_HOME другой"; exit 1; }
+HERDR=${HERDR_APP_HOME:-${HERDR_HOME:-$HOME/.config/herdr-app}}
+[ -d "$HERDR/mods" ] || { echo "Нет $HERDR/mods: Herdr не запускался или HERDR_APP_HOME другой"; exit 1; }
 for m in "$HERE"/mods/*/; do
   n=$(basename "$m"); dst="$HERDR/mods/$n"
   [ -e "$dst" ] && [ ! -L "$dst" ] && mv "$dst" "$dst.bak.$(date +%s)"
