@@ -176,7 +176,7 @@ export default class YggSidebar extends View {
     const d = this.ext;
     if (!d) return [];
     // Чат Herdr прячет свою сессию, только пока его вкладка открыта; старый формат (строки) — как раньше.
-    const known = new Set([...(d.mac?.known ?? []).flatMap((k) => (typeof k === "string" ? [k] : this.openChats?.has(k.chat) ? [k.id] : [])), ...taken, ...(this.opening ?? [])]);
+    const known = new Set([...(d.mac?.known ?? []).flatMap((k) => (typeof k === "string" ? [k] : this.openChats?.has(k.chat) ? [k.id] : [])), ...taken, ...[...(this.chatIds ?? [])].filter(([c]) => this.openChats?.has(c)).map(([, id]) => id)]);
     const out = [], seen = new Set();
     for (const sp of ss) {
       const list = sp.machine ? d.machines?.[sp.machine]?.items : d.mac?.items;
@@ -242,7 +242,11 @@ export default class YggSidebar extends View {
       if (!r?.ok) return;
       session = r.path; name = `${e.title} · копия`;
     }
-    await this.openChat(to, name, e.kind, e.cwd, session, sp.machine ?? null);
+    // Чат знает свою сессию сразу, а не со следующим опросом списка: строка не пропадает и не прыгает (пользователь, 21.11.2026).
+    const chat = await this.openChat(to, name, e.kind, e.cwd, session, sp.machine ?? null);
+    // через shared: открыть могут и из всплывающего списка, это другая копия мода
+    const id = session === e.id ? e.id : String(session).split("/").pop()?.replace(/\.jsonl$/, "");
+    if (chat && id && UUID.test(id)) setShared("ygg.chatIds", { ...(shared("ygg.chatIds") ?? {}), [chat]: id });
   }
 
   extNode(sp, e, last, t) {
@@ -411,7 +415,9 @@ export default class YggSidebar extends View {
     // DeepSeek (ACP) продолжает сессию по id, файла не ищем.
     const found = !machine && session && !session.startsWith("/") && kind !== "deepseek" ? (await ops("find", kind, session)).path : session;
     const remote = machine ? await sshTarget(machine) : null;
-    run("tab.new", { space: spaceId, name, mod: "chat", props: { chat: `c-${randomBytes(4).toString("hex")}`, provider: kind, cwd, session: found ?? session, ...(remote ? { remote } : {}) } });
+    const chat = `c-${randomBytes(4).toString("hex")}`;
+    run("tab.new", { space: spaceId, name, mod: "chat", props: { chat, provider: kind, cwd, session: found ?? session, ...(remote ? { remote } : {}) } });
+    return chat;
   }
 
   // Меню сессии (правый клик): переименовать, закрепить, форк, перенести, скопировать, архивировать.
@@ -716,7 +722,7 @@ export default class YggSidebar extends View {
     const taken = all.flatMap((i) => [i.info.sleepId, i.info.parked].filter(Boolean));
     const ext = this.external(ss.filter((x) => !this.cfg.projects?.[x.name]?.noExternal), taken);
     // Боковые сессии Claude — под родителем, как в Claude. Родитель — сессия списка или вкладка (спящая или чат).
-    const chatSid = new Map((this.ext?.mac?.known ?? []).filter((k) => typeof k !== "string").map((k) => [k.chat, k.id]));
+    const chatSid = new Map([...(this.ext?.mac?.known ?? []).filter((k) => typeof k !== "string").map((k) => [k.chat, k.id]), ...(this.chatIds ?? [])]);
     const sid = (x) => (x.ext ? x.ext.id : x.info.sleepId ?? chatSid.get(x.info.chatId) ?? null);
     const ids = new Set([...all.map(sid), ...ext.map(sid)].filter(Boolean));
     const kidsOf = new Map();
@@ -822,6 +828,7 @@ export default class YggSidebar extends View {
     // по сессиям, а не по папкам). Отстаёт на кадр: если раскладка поменялась, перерисуемся ещё раз.
     this.home = this.nextHome ?? new Map(); this.itemOf = this.nextItem ?? new Map();
     this.nextHome = new Map(); this.nextItem = new Map();
+    this.chatIds = new Map(Object.entries(shared("ygg.chatIds") ?? {}));
     const t = theme();
     // Закрепление из меню сессии (меню — отдельная копия мода): команда через shared.
     const cmd = shared("ygg.pinCmd");
