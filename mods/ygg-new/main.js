@@ -72,7 +72,9 @@ export default class YggNew extends View {
     this.agent = "claude";
     this.model = 0;
     this.mode = "auto";
-    this.open = null; // открытый список: mode, agent, model
+    this.cur = { title: p.title, icon: p.icon, color: p.color }; // подпись проекта; выбор в списке её меняет
+    this.cfg = {}; this.known = {};
+    this.open = null; // открытый список: project, mode, agent, model
     this.worktree = false;
     this.codexModels = [{ id: "", name: "По умолчанию" }];
     this.input = InputState.new({ placeholder: "Опиши задачу для агента" });
@@ -85,6 +87,9 @@ export default class YggNew extends View {
         const list = (cache.models ?? cache).filter((m) => m.visibility !== "hide");
         this.codexModels = [{ id: "", name: "По умолчанию", tip: "Как в настройках Codex" }, ...list.map((m) => ({ id: m.slug, name: m.display_name ?? m.slug, tip: RU[m.description] ?? m.description ?? "" }))];
       } catch {}
+      // Проекты как в боковой панели: настройки (алиас, иконка, цвет) и проекты без открытых пространств.
+      try { this.cfg = JSON.parse(await fs.readFile(`${appHome()}/data/ygg-sidebar/projects.json`, "utf8")); } catch {}
+      try { this.known = JSON.parse(await fs.readFile(`${appHome()}/data/ygg-sidebar/known.json`, "utf8")); } catch {}
       try {
         const last = JSON.parse(await fs.readFile(PREF(), "utf8"));
         Object.assign(this, { agent: last.agent ?? this.agent, mode: (typeof last.mode === "number" ? OLD_MODES[last.mode] : last.mode) ?? this.mode, worktree: last.worktree ?? false });
@@ -97,7 +102,22 @@ export default class YggNew extends View {
   }
 
   models() { return this.agent === "claude" ? CLAUDE_MODELS : this.codexModels; }
-  spaces() { return this.ids.map((id) => spaces().find((s) => s.id === id)).filter(Boolean); }
+  spaces() { return this.sel ?? this.ids.map((id) => spaces().find((s) => s.id === id)).filter(Boolean); }
+
+  // Проекты для списка: пространства с одним видимым именем (алиас) — один проект, как в ygg-sidebar.
+  projects() {
+    const conf = this.cfg.projects ?? {};
+    const live = spaces();
+    const all = [...live, ...Object.entries(this.known).filter(([name]) => !live.some((x) => x.name === name))
+      .map(([name, k]) => ({ id: null, name, folder: k.folder, machine: k.machine ?? null, absent: true }))];
+    const by = new Map();
+    for (const s of all) { const title = conf[s.name]?.alias ?? s.name; by.set(title, [...(by.get(title) ?? []), s]); }
+    return [...by].map(([title, ss]) => {
+      ss.sort((a, b) => Number(Boolean(a.machine)) - Number(Boolean(b.machine))); // этот Mac первым
+      const c = { ...ss.reduce((acc, x) => ({ ...conf[x.name], ...acc }), {}), ...conf[ss[0].name] };
+      return { title, ss, icon: c.icon, color: c.color };
+    }).sort((a, b) => a.title.localeCompare(b.title));
+  }
 
   modes() { return MODES.filter((m) => m[this.agent]); }
   modeOf() { return this.modes().find((m) => m.key === this.mode) ?? MODES.find((m) => m.key === "auto"); }
@@ -182,6 +202,14 @@ export default class YggNew extends View {
     const name = text.split("\n")[0].slice(0, 60);
     const on = sp.machine ?? null;
     try {
+      // Проект без открытого пространства: заводим его в той же папке и на той же машине, как боковая панель.
+      if (sp.absent) {
+        run("space.new", { name: sp.name, folder: sp.folder, machine: sp.machine ?? "", focus: false });
+        for (let i = 0; i < 20 && !spaces().some((y) => y.name === sp.name); i++) await new Promise((r) => setTimeout(r, 150));
+        const id = spaces().find((y) => y.name === sp.name)?.id;
+        if (!id) throw new Error("Не удалось открыть пространство проекта");
+        Object.assign(sp, { id, absent: false });
+      }
       await fs.mkdir(`${appHome()}/data/ygg-new`, { recursive: true });
       await fs.writeFile(PREF(), JSON.stringify({ agent: this.agent, mode: this.mode, worktree: this.worktree, models: { ...this.lastModels, [this.agent]: model } }));
       let cwd = sp.folder;
@@ -214,7 +242,7 @@ export default class YggNew extends View {
 
   render() {
     const t = theme();
-    const p = props() ?? {};
+    const p = this.cur;
     const ss = this.spaces();
     const sp = ss[this.where];
     const state = sp?.machine ? machines().find((m) => m.name === sp.machine)?.layout ?? "loading" : "ready";
@@ -252,8 +280,11 @@ export default class YggNew extends View {
             .child(this.busy ? svg("mods/workspace-chrome/spinner.svg").size(15).text_color(BLUE).spin(900)
               : svg(`${ICONS}/arrow-up.svg`).size(16).text_color(can ? (t.background ?? "#111") : t.dim)))))
       .child(h_flex().px(4).gap(2).items_center()
-        .child(this.chip("project", svg(`${SIDEBAR}/${p.icon ?? "folder"}.svg`).size(14).text_color(p.color ?? t.muted), p.title ?? sp?.name ?? "Проект",
-          ss.map((x) => x.folder).join(", "), () => {}, t, true))
+        .child(this.picker("project", svg(`${SIDEBAR}/${p.icon ?? "folder"}.svg`).size(14).text_color(p.color ?? t.muted), p.title ?? sp?.name ?? "Проект", "Проект",
+          this.projects().map((x) => ({ key: x.title, icon: svg(`${SIDEBAR}/${x.icon ?? "folder"}.svg`).size(16).text_color(x.color ?? t.muted), name: x.title,
+            tip: x.ss.map((y) => (y.machine ? `${y.machine}: ${y.folder}` : (y.folder ?? "").replace(/^\/(Users|home)\/[^/]+/, "~"))).join(" · ") })), p.title ?? sp?.name,
+          (it) => { const x = this.projects().find((y) => y.title === it.key); if (!x) return; this.sel = x.ss; this.where = 0; this.cur = { title: x.title, icon: x.icon, color: x.color }; },
+          t, { on: true, width: 420 }))
         .child(this.chip("where", sp?.machine ? svg(`${ICONS}/server.svg`).size(14).text_color(srvColor) : svg(`${ICONS}/laptop.svg`).size(14),
           sp?.machine ?? "Этот Mac",
           sp?.machine ? `Сервер ${sp.machine} ${state === "ready" ? "доступен" : state === "unavailable" ? "недоступен" : "подключается"}. ${ss.length > 1 ? "Клик — запустить в другом месте" : "Других мест у проекта нет"}` : `Сессия на этом Mac. ${ss.length > 1 ? "Клик — запустить на сервере" : "Других мест у проекта нет"}`,
