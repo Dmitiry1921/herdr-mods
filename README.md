@@ -18,6 +18,41 @@ a Codex-style new-session dialog, a summary panel with context and limits. UI in
 | `ygg-tabs` | верхняя полоса | Заголовок текущей сессии вместо ряда вкладок, кнопки панелей значками |
 | `overrides/chat` | чат | Codex на сервере открывается чатом (нужен хост из форка [herdr-chat](https://github.com/Dmitiry1921/herdr-chat/tree/remote-codex-daemon), ветка `remote-codex-daemon`: путь к его `bin/herdr-chat-host` в `mods/chat/config.json` → `host`); чат Codex открывается, даже если Codex перенёс файл сессии; микрофон в поле ввода, текст набирается по ходу речи (нужны `ffmpeg`, `whisper-server` из whisper-cpp, мод `ygg-new` и модель `~/.cache/whisper-cpp/ggml-large-v3-turbo.bin`); свои сообщения в заметном пузыре |
 
+## Как выглядит
+
+Снимки настоящего окна, данные на них выдуманные.
+
+<table>
+<tr>
+<td width="34%" valign="top"><b>ygg-sidebar</b><br>Проекты по группам, сессии деревом, состояние агента точкой справа: синяя работает, жёлтая ждёт тебя, зелёная закончила. Луна: сессия спит, булавка: закреплена.<br><br><img src="docs/sidebar.png" width="100%"></td>
+<td width="33%" valign="top"><b>ygg-panel</b><br>Правая панель «Сводка»: среда, контекст с разбивкой как в Claude, лимиты Claude и Codex, мои PR, хуки Codex, коннекторы. Разделы сворачиваются, перетаскиваются и закрепляются.<br><br><img src="docs/panel.png" width="100%"></td>
+<td width="33%" valign="top"><b>ygg-settings</b><br>Настройки левой панели: группы, иконка, цвет и имя проекта, сколько сессий видно. Одинаковое имя у двух проектов собирает их в один.<br><br><img src="docs/settings.png" width="100%"></td>
+</tr>
+</table>
+
+### ygg-new: новая сессия
+
+Режим, агент, модель, машина и папка в одной строке, первый ход уходит сразу.
+
+<img src="docs/new-session.png" width="70%">
+
+Режимы Claude и Codex в одном виде, со значками и пояснениями. Видны только режимы выбранного агента, «Полный доступ» оранжевый. Модели с пояснениями по-русски.
+
+<img src="docs/new-mode.png" width="49%"> <img src="docs/new-model.png" width="49%">
+
+### ygg-tabs и ygg-status
+
+Сверху заголовок текущей сессии и кнопки панелей значками. Снизу лимиты Claude и Codex: полоска, процент, время до сброса.
+
+<img src="docs/tabs.png" width="100%">
+<img src="docs/status.png" width="60%">
+
+### overrides/chat: поле ввода чата
+
+Режим со значком из того же общего списка, микрофон с текстом по ходу речи.
+
+<img src="docs/composer.png" width="70%">
+
 `overrides/` это правки встроенных модов Herdr (Apache-2.0, см. `LICENSE`).
 
 ## Поставить
