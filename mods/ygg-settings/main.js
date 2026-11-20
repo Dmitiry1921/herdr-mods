@@ -1,7 +1,7 @@
 // ygg-settings: окно настроек левой панели вместо правки projects.json руками.
 // Проекты: имя в панели (одинаковое имя у двух проектов = один проект), группа, иконка, цвет, сколько сессий видно.
 // Группы: добавить, убрать. Пишет в тот же projects.json, панель подхватывает его сама за пару секунд.
-import { View, div, svg } from "gpui-kit";
+import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, Input, InputState } from "gpui-base";
 import { spaces, theme, appHome, readTextFile, writeTextFile, props, closeOverlay, run, updates } from "herdr";
 
@@ -44,7 +44,7 @@ const COLORS = [
 const NO_GROUP = "Без группы";
 // Модель новой сессии по агенту: настройки чата (herdr-chat), список моделей — тот, что агенты отдали чатам.
 const CHAT = () => `${appHome()}/data/herdr-chat/settings.json`;
-const MODELS = () => `${appHome()}/data/herdr-chat/models.json`;
+const MODELS = (a) => `${appHome()}/data/herdr-chat/models-${a}.json`; // пишет каждый чат (overrides/chat/defaults.js)
 const AGENTS = { claude: "Claude", codex: "Codex", deepseek: "DeepSeek", pi: "Pi" };
 
 export default class Settings extends View {
@@ -61,7 +61,8 @@ export default class Settings extends View {
       try { this.cfg = { groups: [], projects: {}, ...JSON.parse((await readTextFile(CONFIG())) ?? "{}") }; } catch {}
       try { this.known = JSON.parse((await readTextFile(KNOWN())) ?? "{}") ?? {}; } catch {}
       try { this.chat = JSON.parse((await readTextFile(CHAT())) ?? "{}") ?? {}; } catch {}
-      try { this.models = JSON.parse((await readTextFile(MODELS())) ?? "{}") ?? {}; } catch {}
+      this.models = {};
+      for (const a of Object.keys(AGENTS)) { try { this.models[a] = JSON.parse((await readTextFile(MODELS(a))) ?? "[]") ?? []; } catch {} }
       if (this.newGroupFor) this.edit("+group", "", cx);
       cx.notify();
     });
@@ -217,17 +218,43 @@ export default class Settings extends View {
           for (const p of Object.values(c.projects)) if (p.group === g) delete p.group;
         }, cx), false, 20)));
 
-    // Модель, с которой начинается новая сессия, по агенту. Список — что агент сам отдал (открой чат с ним хоть раз).
-    const agents = Object.keys(this.models ?? {}).filter((a) => (this.models[a] ?? []).length);
-    const models = agents.length ? [h_flex().h(28).px(8).pt(8).items_center().child(div().text_size(11).text_color(t.dim).child("МОДЕЛЬ НОВОЙ СЕССИИ")),
-      ...agents.map((a) => {
-        const cur = this.chat?.[a]?.model ?? null;
-        return h_flex().id(`mdl-${a}`).px(8).py(6).gap(8).items_start()
-          .child(div().w(80).flex_none().pt(3).text_color(t.foreground).child(AGENTS[a] ?? a))
-          .child(h_flex().flex_1().min_w(0).flex_wrap().gap(6)
-            .child(chip(`mdl-${a}-none`, "Как решит агент", "Модель не задана: агент берёт свою по умолчанию", (cx) => this.setModel(a, null, cx), !cur))
-            .children(this.models[a].map((m) => chip(`mdl-${a}-${m.value}`, m.label, m.value, (cx) => this.setModel(a, m.value, cx), cur === m.value))));
-      })] : [];
+    // Модель новой сессии: строка на агента — логотип, имя и выпадающий выбор справа, как настройка в Claude и Codex.
+    // Список — то, что агент сам отдал в чате; пока чата с агентом не было, выбирать не из чего, строка это и говорит.
+    const LOGO = { claude: "claude", codex: "codex", deepseek: "deepseek-badge" };
+    const agents = Object.keys(AGENTS);
+    const modelRow = (a) => {
+      const list = this.models?.[a] ?? [];
+      const cur = this.chat?.[a]?.model ?? null;
+      const label = cur ? list.find((m) => m.value === cur)?.label ?? cur : "Как решит агент";
+      const open = this.modelOpen === a;
+      const logo = LOGO[a] ? image(`${ICONS}/${LOGO[a]}.svg`).size(16).flex_none() : icon("bot", 16);
+      const pick = (value) => (cx) => { this.modelOpen = null; this.setModel(a, value, cx); };
+      const option = (id, text, hint, value) => h_flex().id(`mdl-${a}-${id}`).h(30).px(10).gap(8).items_center().rounded(6).cursor_pointer()
+        .hover((st) => st.bg(t.hover)).on_click((_e, cx) => pick(value)(cx))
+        .child(div().w(14).flex_none().child(value === cur ? icon("check", 13, t.foreground) : div()))
+        .child(div().flex_1().min_w(0).truncate().text_color(value === cur ? t.foreground : t.muted).child(text))
+        .when(Boolean(hint), (el) => el.child(div().text_size(11.5).text_color(t.dim).child(hint)));
+      const line = h_flex().id(`mdl-${a}`).h(44).px(8).gap(10).items_center()
+        .child(logo)
+        .child(div().flex_1().text_color(list.length ? t.foreground : t.muted).child(AGENTS[a] ?? a))
+        .child(list.length
+          ? h_flex().id(`mdl-${a}-sel`).h(30).min_w(180).px(10).gap(8).items_center().rounded(8).border(1).cursor_pointer()
+            .border_color(open ? t.foreground : t.border).bg(t.input ?? t.chrome).hover((st) => st.bg(t.hover))
+            .tooltip("Модель, с которой стартует новый чат. Клик — выбрать")
+            .on_click((_e, cx) => { this.modelOpen = open ? null : a; cx.notify(); })
+            .child(div().flex_1().text_color(cur ? t.foreground : t.muted).child(label))
+            .child(icon(open ? "chevron-up" : "chevron-down", 12))
+          : div().text_size(12).text_color(t.dim).child("Список появится после первого чата"));
+      if (!open) return line;
+      return v_flex().child(line).child(v_flex().ml(34).mr(8).mb(8).p(4).rounded(8).border(1).border_color(t.border).bg(t.chrome)
+        .child(option("none", "Как решит агент", "по умолчанию у агента", null))
+        .child(div().h(1).mx(6).my(4).bg(t.border))
+        .children(list.map((m) => option(m.value, m.label, m.value.replace(/^[^/]*\//, ""), m.value))));
+    };
+    const models = [v_flex().px(8).pt(12).pb(4).gap(2)
+        .child(div().text_size(11).text_color(t.dim).child("МОДЕЛЬ НОВОЙ СЕССИИ"))
+        .child(div().text_size(12).text_color(t.dim).child("С какой моделью открывается новый чат с агентом. Сменить её в чате можно всегда.")),
+      ...agents.map(modelRow), div().h(1).mx(8).my(6).bg(t.border)];
     return v_flex().size_full().bg(t.popover ?? t.chrome).text_size(13).text_color(t.foreground)
       .child(h_flex().h(44).px(16).items_center().border_b(1).border_color(t.border)
         .child(icon("settings", 15))

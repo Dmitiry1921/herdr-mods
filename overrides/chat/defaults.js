@@ -1,20 +1,20 @@
 // Модель новой сессии по агенту (окно настроек панели, ygg-settings): data/herdr-chat/settings.json → <агент>.model,
-// «провайдер/id» как в выборе модели. Список моделей для настроек каждый чат кладёт в data/herdr-chat/models.json:
+// «провайдер/id» как в выборе модели. Список моделей для настроек каждый чат кладёт в data/herdr-chat/models-<агент>.json:
 // его отдаёт сам агент, руками ничего не поддерживается (пользователь, 21.11.2026).
 import { readTextFile, writeTextFile } from "herdr";
 import { stateDir } from "./connection.js";
 
 const read = async (p) => { try { return JSON.parse((await readTextFile(p)) ?? "{}") ?? {}; } catch { return {}; } };
 const SETTINGS = () => `${stateDir()}/settings.json`;
-const MODELS = () => `${stateDir()}/models.json`;
+// Файл на агента: чаты пишут одновременно (перезагрузка мода), общий файл последний затирал.
+const MODELS = (agent) => `${stateDir()}/models-${agent}.json`;
 
 export async function rememberModels(agent, models) {
   const list = (models ?? []).filter((m) => m?.provider && m?.id && !/^default$/i.test(m.id)).map((m) => ({ value: `${m.provider}/${m.id}`, label: m.name || m.id }));
   if (!agent || !list.length) return;
-  const all = await read(MODELS());
-  if (JSON.stringify(all[agent]) === JSON.stringify(list)) return;
-  all[agent] = list;
-  await writeTextFile(MODELS(), JSON.stringify(all, null, 2));
+  const raw = await readTextFile(MODELS(agent)).catch(() => null);
+  if (raw && raw.trim() === JSON.stringify(list, null, 2)) return;
+  await writeTextFile(MODELS(agent), JSON.stringify(list, null, 2));
 }
 
 export async function defaultModel(agent) {
