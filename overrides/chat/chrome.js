@@ -43,6 +43,15 @@ export function footerTier(width) {
   return width < 200 ? "xs" : width < 300 ? "sm" : width < 520 ? "md" : "full";
 }
 
+function lastModel(items) {
+  for (let i = (items?.length ?? 0) - 1; i >= 0; i--) if (items[i]?.model && !/default/i.test(items[i].model)) return items[i].model;
+  return null;
+}
+const prettyModel = (m) => {
+  const x = String(m).split("/").pop().match(/^claude-([a-z]+)-(\d+)(?:-(\d+))?/i);
+  return x ? `${x[1][0].toUpperCase()}${x[1].slice(1)} ${x[2]}${x[3] && x[3].length < 3 ? `.${x[3]}` : ""}` : String(m).split("/").pop();
+};
+
 export function footerControls(v, t, { width }) {
   const s = v.store.state;
   const caps = s.capabilities ?? null; // what this agent can do (null until the host says)
@@ -51,11 +60,13 @@ export function footerControls(v, t, { width }) {
   const drawn = []; // the chips drawn, by name (the dump: footerChips)
   const tiny = tier === "xs";
   const left = [];
-  const name = s.model?.name ?? s.model?.id ?? "Model";
+  // Claude Code с моделью «default» отвечает конкретной моделью: она в последнем ответе (claude-opus-5-5 → Opus 5.5).
+  const real = /^default$/i.test(s.model?.id ?? "") ? lastModel(v.store.items) : null;
+  const name = real ? prettyModel(real) : s.model?.name ?? s.model?.id ?? "Model";
   const provider = v.providerId();
   const small = tiny || tier === "sm";
   const chevron = () => (small ? div() : icon("chevron-down", 11).text_color(t.dim));
-  const modelTip = withKey(`${v.providerName()}${s.model ? ` · ${name} (${s.model.provider}/${s.model.id})` : ""} · /model`, "model");
+  const modelTip = withKey(`${v.providerName()}${s.model ? ` · ${name} (${real ?? `${s.model.provider}/${s.model.id}`})` : ""} · /model`, "model");
   left.push(chipEl("chip-model", t, { tip: modelTip, onClick: (_e, cx) => v.control("chip:model", cx) }).when(tiny, (e) => e.px(6))
     .child(providerIcon(provider, 13))
     .when(!tiny, (e) => e.child(div().max_w(tier === "sm" ? 72 : tier === "md" ? 120 : 180).truncate().child(tier === "sm" ? shortModel(name) : name)))
