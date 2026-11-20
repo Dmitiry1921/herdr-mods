@@ -42,6 +42,10 @@ const COLORS = [
   "#fea362", "#f5cd47", "#e2b203", "#b3df72", "#94c748", "#4bce97", "#2abb7f", "#1f845a", "#8590a2", "#9fadbc", "#c7d1db", "#ae8e6a",
 ];
 const NO_GROUP = "Без группы";
+// Модель новой сессии по агенту: настройки чата (herdr-chat), список моделей — тот, что агенты отдали чатам.
+const CHAT = () => `${appHome()}/data/herdr-chat/settings.json`;
+const MODELS = () => `${appHome()}/data/herdr-chat/models.json`;
+const AGENTS = { claude: "Claude", codex: "Codex", deepseek: "DeepSeek", pi: "Pi" };
 
 export default class Settings extends View {
   init(_p, cx) {
@@ -56,6 +60,8 @@ export default class Settings extends View {
     cx.spawn(async (cx) => {
       try { this.cfg = { groups: [], projects: {}, ...JSON.parse((await readTextFile(CONFIG())) ?? "{}") }; } catch {}
       try { this.known = JSON.parse((await readTextFile(KNOWN())) ?? "{}") ?? {}; } catch {}
+      try { this.chat = JSON.parse((await readTextFile(CHAT())) ?? "{}") ?? {}; } catch {}
+      try { this.models = JSON.parse((await readTextFile(MODELS())) ?? "{}") ?? {}; } catch {}
       if (this.newGroupFor) this.edit("+group", "", cx);
       cx.notify();
     });
@@ -74,6 +80,27 @@ export default class Settings extends View {
       fn(cfg);
       await writeTextFile(CONFIG(), `${JSON.stringify(cfg, null, 2)}\n`, raw);
       this.cfg = cfg;
+      cx.notify();
+    });
+  }
+
+  // Модель новой сессии агента: null — как решит сам агент. Остальные настройки чата не трогаем.
+  setModel(agent, value, cx) {
+    const apply = (c) => {
+      const a = { ...(c[agent] ?? {}) };
+      if (value) a.model = value; else delete a.model;
+      if (Object.keys(a).length) c[agent] = a; else delete c[agent];
+    };
+    const mine = JSON.parse(JSON.stringify(this.chat ?? {}));
+    apply(mine);
+    this.chat = mine;
+    cx.notify();
+    cx.spawn(async (cx) => {
+      const raw = await readTextFile(CHAT()).catch(() => null);
+      const c = JSON.parse(raw ?? "{}") ?? {};
+      apply(c);
+      await writeTextFile(CHAT(), `${JSON.stringify(c, null, 2)}\n`, raw);
+      this.chat = c;
       cx.notify();
     });
   }
@@ -153,14 +180,16 @@ export default class Settings extends View {
       const toggle = (what) => (cx) => { this.open = open === what ? null : { title, what }; cx.notify(); };
       const set = (patch) => (cx) => { this.open = null; this.setProject(keys, patch, cx); };
       const line = h_flex().id(`p-${title}`).h(36).px(8).gap(6).items_center().rounded(6).hover((s) => s.bg(t.hover))
-        .child(btn(`i-${title}`, icon(c.icon ?? "folder", 15, color), "Иконка", toggle("icon"), open === "icon"))
+        // проект и на другой машине: зелёная планетка в углу значка, как в панели
+        .child(btn(`i-${title}`, div().relative().child(icon(c.icon ?? "folder", 15, color))
+          .when(remote, (el) => el.child(div().absolute().right(-3).bottom(-3).size(10).rounded(5).bg(t.popover ?? t.chrome).flex().items_center().justify_center()
+            .child(icon("globe", 8, "#2abb7f")))), remote ? "Иконка · проект живёт и на сервере" : "Иконка", toggle("icon"), open === "icon"))
         .child(btn(`c-${title}`, div().size(12).rounded(6).bg(color), "Цвет", toggle("color"), open === "color"))
         .child(this.editing === title
           ? div().flex_1().min_w(0).child(Input.new(this.input).w_full())
           : h_flex().id(`n-${title}`).flex_1().min_w(0).gap(6).items_center().cursor_pointer()
             .on_click((_e, cx) => this.edit(title, title, cx))
-            .child(div().min_w(0).truncate().text_color(t.foreground).child(title))
-            .when(remote, (el) => el.child(icon("server", 12, t.dim))))
+            .child(div().min_w(0).truncate().text_color(t.foreground).child(title)))
         .child(btn(`g-${title}`, icon("folder-input", 14, open === "group" ? t.foreground : t.muted), "Группа", toggle("group"), open === "group"))
         .child(stepper(`v-${title}`, vis, defVisible, "Сколько сессий видно в свёрнутом проекте",
           (n, cx) => this.setProject(keys, { visible: n === defVisible ? null : n }, cx)));
@@ -188,12 +217,24 @@ export default class Settings extends View {
           for (const p of Object.values(c.projects)) if (p.group === g) delete p.group;
         }, cx), false, 20)));
 
+    // Модель, с которой начинается новая сессия, по агенту. Список — что агент сам отдал (открой чат с ним хоть раз).
+    const agents = Object.keys(this.models ?? {}).filter((a) => (this.models[a] ?? []).length);
+    const models = agents.length ? [h_flex().h(28).px(8).pt(8).items_center().child(div().text_size(11).text_color(t.dim).child("МОДЕЛЬ НОВОЙ СЕССИИ")),
+      ...agents.map((a) => {
+        const cur = this.chat?.[a]?.model ?? null;
+        return h_flex().id(`mdl-${a}`).px(8).py(6).gap(8).items_start()
+          .child(div().w(80).flex_none().pt(3).text_color(t.foreground).child(AGENTS[a] ?? a))
+          .child(h_flex().flex_1().min_w(0).flex_wrap().gap(6)
+            .child(chip(`mdl-${a}-none`, "Как решит агент", "Модель не задана: агент берёт свою по умолчанию", (cx) => this.setModel(a, null, cx), !cur))
+            .children(this.models[a].map((m) => chip(`mdl-${a}-${m.value}`, m.label, m.value, (cx) => this.setModel(a, m.value, cx), cur === m.value))));
+      })] : [];
     return v_flex().size_full().bg(t.popover ?? t.chrome).text_size(13).text_color(t.foreground)
       .child(h_flex().h(44).px(16).items_center().border_b(1).border_color(t.border)
         .child(icon("settings", 15))
         .child(div().flex_1().pl(8).font_medium().child("Настройки панели"))
         .child(btn("close", svg("mods/pane/close.svg").size(13).text_color(t.muted), "Закрыть", () => close())))
       .child(thin("projects", v_flex().id("projects").w_full().px(8).pb(8)
+        .children(models)
         .children(sections.filter((x) => x.items.length || x.g !== NO_GROUP).flatMap(({ g, items }) => [header(g, items.length), ...items.map(row)])), true))
       .child(h_flex().px(16).py(10).gap(10).items_center().border_t(1).border_color(t.border)
         .child(this.editing === "+group"

@@ -45,6 +45,7 @@ import { branchChip, emptyState, footerControls, planStrip, queueChips, queueLab
 import { openFile } from "./files.js";
 import { Composer } from "./composer.js";
 import { Links } from "./links.js";
+import { applyDefaults } from "./defaults.js";
 import { Picker, menuView, slashItems, wheel as wheelMenu } from "./menus.js";
 import { DialogCard } from "./dialogs.js";
 import { Debug } from "./debug.js";
@@ -328,6 +329,7 @@ export default class HerdrChat extends View {
     if (!this.peekMode && !this.findPlace()) this.lookupPlace(cx);
     this.applyZoom();
     if (this.store.loaded && !this.sub) this.renameTab();
+    applyDefaults(this, cx);
     const me = this.myPane();
     let changed = false;
     const zk = `${Boolean(me?.zoomed)}:${panes().find((p) => p.tab === me?.tab && p.zoomed)?.pane ?? ""}`;
