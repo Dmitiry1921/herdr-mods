@@ -780,9 +780,9 @@ export default class YggSidebar extends View {
 
   // Всплывашка свёрнутой панели (как в Codex): наведение на значок открывает проект с его сессиями.
   // Закрывается, когда указатель ушёл и со значка, и со всплывашки.
-  pop(key, n) {
+  pop(key, n, again = false) {
     clearTimeout(this.popTimer);
-    if (this.popKey === key) return;
+    if (this.popKey === key && !again) return;
     if (this.popId) closeOverlay(this.popId);
     this.popKey = key;
     const y = Math.max(8, (this.at?.y ?? 80) - 22);
@@ -807,13 +807,14 @@ export default class YggSidebar extends View {
       ...list.map(({ s, ss, title, conf }) => {
         const items = ss.flatMap((sp) => (sp.tabs ?? []).map((tab) => ({ s: sp, tab, info: this.session(tab, tabTerms, ps, kids) })));
         const st = top(items.map((i) => i.info.status).filter(Boolean));
-        const best = [...items].sort((a, b) => (RANK[b.info.status] ?? 0) - (RANK[a.info.status] ?? 0))[0];
         const active = ss.some((x) => x.active);
+        // Серые значки, свой цвет только у проекта открытой сессии. Клик, как и наведение, — всплывашка с сессиями:
+        // сессию выбирают там (пользователь, 21.11.2026: «а не просто хуй пойми какую сессию чтобы открывало»).
         return cell(`rail-${s.name}`).when(active, (el) => el.bg(t.selected))
           .on_mouse_move((e) => { this.at = e.position; })
           .on_hover((h) => (h ? this.pop(s.name, items.length) : this.unpop()))
-          .on_click(() => (best ? this.open(best.s, best.tab, best.info) : s.id && run("space.select", { id: s.id })))
-          .child(svg(`${ICONS}/${conf.icon ?? "folder"}.svg`).size(17).text_color(conf.color ?? t.muted))
+          .on_click(() => (items.length ? this.pop(s.name, items.length, true) : s.id && run("space.select", { id: s.id })))
+          .child(svg(`${ICONS}/${conf.icon ?? "folder"}.svg`).size(17).text_color(active ? conf.color ?? t.foreground : t.muted))
           .when(st === "working" || st === "blocked" || st === "done", (el) => el.child(div().absolute().top(5).right(5).size(7).rounded(4).bg(C[st])));
       }),
     ]);
