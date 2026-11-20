@@ -251,9 +251,8 @@ export default class YggSidebar extends View {
     const row = h_flex().id(`ext-${e.id}`).relative().h(ROW).px(6).gap(8).items_center().rounded(6).cursor_pointer()
       .hover((st) => st.bg(t.hover))
       .on_click((_e, cx) => { this.openExternal(sp, e); cx.notify(); })
-      .child(div().flex_none().opacity(0.55).child(this.agentIcon(e.kind, t)))
+      .child(this.withGlobe(div().flex_none().opacity(0.55).child(this.agentIcon(e.kind, t)), remote ? sp.machine : null, t))
       .child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(label(e.title, e.kind)))
-      .when(remote, (el) => el.child(this.machineMark(sp.machine, t)))
       .child(this.slot(busy ? div().id(`busy-${e.id}`).tooltip("Открыта в приложении Claude. Клик — копия здесь")
         .child(svg(`${ICONS}/app-window.svg`).size(12).text_color(C.working)) : null));
     return v_flex().relative().child(this.branch(last)).child(row);
@@ -589,6 +588,17 @@ export default class YggSidebar extends View {
     run("tab.select", { id: tab.id });
   }
 
+  // Сессия или проект на другой машине: как в Codex, зелёная планетка в правом нижнем углу своего значка
+  // (пользователь, 21.11.2026), цвет по состоянию машины, имя и состояние в подсказке.
+  withGlobe(el, name, t, what = "Сессия работает там") {
+    if (!name) return el;
+    const st = machines().find((m) => m.name === name)?.layout ?? "loading";
+    const [color, word] = M[st] ?? M.loading;
+    return div().id(`globe-${name}-${what.length}`).relative().flex_none().tooltip(`${what}: ${name} ${word}`).child(el)
+      .child(div().absolute().right(-3).bottom(-3).size(10).rounded(5).bg(t.background).flex().items_center().justify_center()
+        .child(svg(`${ICONS}/globe.svg`).size(8).text_color(color)));
+  }
+
   // Сервер — всегда один значок без подписи: имя и состояние в подсказке.
   machineMark(name, t, what = "Сессия работает там") {
     const st = machines().find((m) => m.name === name)?.layout ?? "loading";
@@ -654,10 +664,9 @@ export default class YggSidebar extends View {
       .on_mouse_down("right", (e) => openOverlay({ mod: "ygg-sidebar", kind: "popup", width: 280, height: 235,
         at: { x: e.position?.x ?? 40, y: e.position?.y ?? 80 }, props: { smenu: { tab: tab.id, space: s.id } } }))
       .on_hover((h, cx) => { this.hovered = h ? pkey : this.hovered === pkey ? null : this.hovered; cx.notify(); }), "s", tab.id, flat ? "__pins" : s.name, () => this.open(s, tab, info))
-      .child(div().flex_none().when(sleeping, (el) => el.opacity(0.55)).child(this.agentIcon(info.kind, t)))
+      .child(this.withGlobe(div().flex_none().when(sleeping, (el) => el.opacity(0.55)).child(this.agentIcon(info.kind, t)), remote ? s.machine : null, t))
       .child(div().flex_1().min_w(0).truncate().text_color(sleeping ? t.dim : t.foreground).child(label(this.tabName(tab, info), info.kind)))
       .when(flat, (el) => el.child(div().flex_none().max_w(90).truncate().text_size(11).text_color(t.dim).child((this.cfg.projects?.[s.name]?.alias) ?? s.name)))
-      .when(remote && !flat, (el) => el.child(this.machineMark(s.machine, t)))
       .child(this.slot(this.mark(info, remote, t)))
       .when(this.hovered === pkey, (el) => el.child(this.actions([this.pinButton(pkey, t, true)], tab.active && s.active ? t.selected : t.hover)));
     if (flat) return row;
@@ -690,12 +699,11 @@ export default class YggSidebar extends View {
       .on_hover((h, cx) => { this.hovered = h ? pkey : this.hovered === pkey ? null : this.hovered; cx.notify(); }), "p", key, group, (_e, cx) => this.fold(key, cx))
       .on_mouse_down("right", (e) => openOverlay({ mod: "ygg-sidebar", kind: "popup", width: 280, height: this.menuHeight({ ss }),
         at: { x: e.position?.x ?? 40, y: e.position?.y ?? 80 }, props: { menu: key, at: { x: e.position?.x ?? 40, y: e.position?.y ?? 80 } } }))
-      .child(svg(`${ICONS}/${conf.icon ?? "folder"}.svg`).size(15).flex_none().text_color(color))
+      .child(this.withGlobe(svg(`${ICONS}/${conf.icon ?? "folder"}.svg`).size(15).flex_none().text_color(color), [...new Set(ss.map((x) => x.machine).filter(Boolean))][0], t, "Проект живёт и там"))
       .child(div().flex_initial().min_w(0).truncate().font_medium().text_color(t.foreground).child(title))
       .child(svg(`${ICONS}/chevron-${folded ? "right" : "down"}.svg`).size(12).flex_none().text_color(t.dim))
       .child(div().flex_1())
       .when(this.pins.has(pkey), (el) => el.child(this.slot(svg(`${ICONS}/pin.svg`).size(11).text_color(t.dim))))
-      .children([...new Set(ss.map((x) => x.machine).filter(Boolean))].map((m) => this.machineMark(m, t, "Проект живёт и там")))
       // Свёрнутый проект показывает в колонке статуса самое важное из своих сессий.
       .child(this.slot(folded && lit.length ? this.mark({ status: top(lit) }, false, t) : null))
       .when(this.hovered === pkey, (el) => el.child(this.actions([
@@ -712,12 +720,38 @@ export default class YggSidebar extends View {
     const sid = (x) => (x.ext ? x.ext.id : x.info.sleepId ?? chatSid.get(x.info.chatId) ?? null);
     const ids = new Set([...all.map(sid), ...ext.map(sid)].filter(Boolean));
     const kidsOf = new Map();
-    for (const x of ext) if (x.ext.parent && x.ext.parent !== x.ext.id && ids.has(x.ext.parent)) kidsOf.set(x.ext.parent, [...(kidsOf.get(x.ext.parent) ?? []), x]);
-    const nested = new Set([...kidsOf.values()].flat());
+    // Родитель есть и у открытых чатов: список внешних сессий знает всех, а не только тех, что показывает.
+    const parentOf = new Map([...(this.ext?.mac?.items ?? []), ...Object.values(this.ext?.machines ?? {}).flatMap((m) => m?.items ?? [])]
+      .filter((e) => e.parent).map((e) => [e.id, e.parent]));
+    // Родитель в архиве (его в списке нет): как в Claude, братья с общим родителем идут под старшего из них.
+    const orphans = new Map();
+    for (const x of [...all, ...ext]) { const id = sid(x); if (id) { this.nextHome.set(id, key); this.nextItem.set(id, x); } }
+    const par = (id) => id && (parentOf.get(id) ?? null);
+    const away = new Set(); // свои, чей родитель живёт в другом проекте: рисуются там
+    for (const x of [...items, ...ext]) {
+      const id = sid(x), p = x.ext ? x.ext.parent : par(id);
+      if (!p || p === id) continue;
+      if (ids.has(p)) kidsOf.set(p, [...(kidsOf.get(p) ?? []), x]);
+      else if (this.home.has(p) && this.home.get(p) !== key) away.add(x);
+      else orphans.set(p, [...(orphans.get(p) ?? []), x]);
+    }
+    for (const list of orphans.values()) {
+      if (list.length < 2) continue;
+      const [eldest, ...rest] = [...list].sort((a, b) => this.born(a, sid) - this.born(b, sid));
+      const id = sid(eldest);
+      if (id) kidsOf.set(id, [...(kidsOf.get(id) ?? []), ...rest]);
+    }
+    // чужие, чей родитель здесь (по прошлой отрисовке)
+    for (const [id, x] of this.itemOf) {
+      const p = par(id);
+      if (p && ids.has(p) && this.home.get(id) !== key && !(kidsOf.get(p) ?? []).includes(x)) kidsOf.set(p, [...(kidsOf.get(p) ?? []), x]);
+    }
+    const nested = new Set([...kidsOf.values()].flat(), ...away);
     const nest = (x, seen = new Set()) => {
       const id = sid(x), list = id && !seen.has(id) ? kidsOf.get(id) ?? [] : [];
       seen.add(id);
-      return list.length ? [v_flex().relative().ml(13).pl(STUB).children(list.map((k, i) => this.extNode(k.s, k.ext, i === list.length - 1, t).children(nest(k, seen))))] : [];
+      return list.length ? [v_flex().relative().ml(13).pl(STUB).children(list.map((k, i) => (k.ext ? this.extNode(k.s, k.ext, i === list.length - 1, t)
+        : this.sessionNode(k.s, k.tab, k.info, i === list.length - 1, t)).children(nest(k, seen))))] : [];
     };
     // Начатые вне Herdr за последние сутки — сразу после работающих, раньше своих спящих: новое видно без «Показать больше».
     const roots = ext.filter((x) => !nested.has(x));
@@ -725,7 +759,7 @@ export default class YggSidebar extends View {
     // Старые сверху, новые снизу, по времени создания, а не по статусу или активности: ничего не прыгает, а старые
     // наверху просят решить, нужны ли они ещё (пользователь, 21.11.2026). Вкладка без известной даты — с момента, как её
     // увидела панель. Работающие и свежие внешние видны всегда, остальные добирают до N сверху, то есть самые старые.
-    const every = [...items, ...roots].sort((a, b) => this.born(a, sid) - this.born(b, sid));
+    const every = [...items.filter((x) => !nested.has(x)), ...roots].sort((a, b) => this.born(a, sid) - this.born(b, sid));
     let room = Math.max(0, limit - items.filter((i) => i.info.status).length - fresh.length);
     const shown = open ? every : every.filter((i) => i.info?.status || (i.ext && i.ext.at > day) || room-- > 0);
     const hidden = every.length - shown.length;
@@ -784,6 +818,10 @@ export default class YggSidebar extends View {
   }
 
   render() {
+    // Где какая сессия по прошлой отрисовке: дочерняя из другого проекта встаёт под родителя (как в Claude, где дерево
+    // по сессиям, а не по папкам). Отстаёт на кадр: если раскладка поменялась, перерисуемся ещё раз.
+    this.home = this.nextHome ?? new Map(); this.itemOf = this.nextItem ?? new Map();
+    this.nextHome = new Map(); this.nextItem = new Map();
     const t = theme();
     // Закрепление из меню сессии (меню — отдельная копия мода): команда через shared.
     const cmd = shared("ygg.pinCmd");

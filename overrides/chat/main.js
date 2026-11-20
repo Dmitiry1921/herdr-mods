@@ -44,6 +44,7 @@ import { space } from "./space.js";
 import { branchChip, emptyState, footerControls, planStrip, queueChips, queueLabels, widgetTray } from "./chrome.js";
 import { openFile } from "./files.js";
 import { Composer } from "./composer.js";
+import { Links } from "./links.js";
 import { Picker, menuView, slashItems, wheel as wheelMenu } from "./menus.js";
 import { DialogCard } from "./dialogs.js";
 import { Debug } from "./debug.js";
@@ -2203,7 +2204,13 @@ export default class HerdrChat extends View {
       .anchor("bottom_left").w_full()
       .when(Boolean(menu), (e) => e.content(div().w(this.colW()).pb(8).child(menu)));
     // Its height is in the dump: an open menu must not change it (an overlay, not the flow).
+    // Плашка связей сессии (links.js): задачи и PR у Yggdrasil и Ariadne, над полем ввода, как в моде Claude.
+    // Lazily: при горячей перезагрузке конструктор не перезапускается.
+    const links = this.links instanceof Links ? this.links : (this.links = new Links());
+    links.tick(s.sessionFile, cx);
+    const band = links.view(t);
     const bottom = v_flex().id("chat-bottom").w_full().gap(8)
+      .children(band ? [band] : [])
       .on_size_change((sz, cx) => { if (sz.height !== this.bottomH) { this.bottomH = sz.height; this.debug.mark(); } })
       .when(Boolean(s.dialog), (e) => e.child(this.dialog.view(s.dialog, s.dialogsPending, t, (k, v, cx) => this.answer(k, v, cx), c)))
       .children([widgetTray(this, above, t), queueChips(this, s, t), planStrip(this, s, t)].filter(Boolean))

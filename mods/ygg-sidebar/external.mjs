@@ -92,7 +92,8 @@ function known() {
     for (const f of fs.readdirSync(dir).filter((x) => x.endsWith(".json"))) {
       try {
         const s = JSON.parse(fs.readFileSync(path.join(dir, f), "utf8"));
-        for (const v of [s.sessionFile, s.session, s.sessionId, s.threadId]) { const m = String(v ?? "").match(UUID); if (m) out.push({ chat: s.chat, id: m[0] }); }
+        // из пути транскрипта только имя файла: в папке проекта бывает свой UUID (scratch-workspaces/<uuid>/…)
+        for (const v of [s.sessionFile && path.basename(s.sessionFile), s.session, s.sessionId, s.threadId]) { const m = String(v ?? "").match(UUID); if (m) out.push({ chat: s.chat, id: m[0] }); }
       } catch {}
     }
   } catch {}
