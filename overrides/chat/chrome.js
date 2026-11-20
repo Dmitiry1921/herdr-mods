@@ -9,6 +9,7 @@ import { div, svg } from "gpui-kit";
 import { v_flex, h_flex, Popover } from "gpui-base";
 import { MOD, alpha, count, icon, money, providerIcon, spans, spansText, unwrapHc } from "./util.js";
 import { withKey } from "./shortcuts.js";
+import { shared } from "herdr";
 import { planProgress, planSteps } from "./cards.js";
 
 const STATUS_MAX = 28;
@@ -90,7 +91,9 @@ export function footerControls(v, t, { width }) {
   }
   const u = s.usage;
   const cost = caps?.cost === false || tier !== "full" ? null : u?.cost ?? null;
-  if (u && (u.percent != null || cost != null)) {
+  // Контекст закреплён в панели Yggdrasil (ygg-panel.prefs): там он и так на виду, чип показал бы то же второй раз.
+  const pinned = (shared("ygg-panel.prefs")?.pinned ?? []).includes("context");
+  if (u && ((u.percent != null && !pinned) || cost != null)) {
     const win = u.contextWindow ?? s.model?.contextWindow ?? null;
     const tip = [
       u.percent != null ? `${Math.round(u.percent)}% of the context window` : null,
@@ -98,9 +101,9 @@ export function footerControls(v, t, { width }) {
       (caps?.cost === false ? null : u?.cost ?? null) != null ? `${money(u.cost)} this session` : null,
     ].filter(Boolean).join(" · ");
     left.push(chipEl("chip-context", t, { tip }).when(tiny, (e) => e.px(6))
-      .when(u.percent != null, (e) => e.child(ring(u.percent, t)).when(!small, (x) => x.child(div().text_size(11.5).child(`${Math.round(u.percent)}%`))))
+      .when(u.percent != null && !pinned, (e) => e.child(ring(u.percent, t)).when(!small, (x) => x.child(div().text_size(11.5).child(`${Math.round(u.percent)}%`))))
       .when(cost != null, (e) => e.child(div().text_size(11.5).text_color(t.dim).child(money(cost)))));
-    drawn.push("context", ...(cost != null ? ["cost"] : []));
+    drawn.push(...(pinned ? [] : ["context"]), ...(cost != null ? ["cost"] : []));
   }
   v.footerChips = drawn;
   // Statuses: as many chips as fit, then "+N".
