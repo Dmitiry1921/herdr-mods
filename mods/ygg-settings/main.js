@@ -3,7 +3,7 @@
 // Группы: добавить, убрать. Пишет в тот же projects.json, панель подхватывает его сама за пару секунд.
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, Input, InputState } from "gpui-base";
-import { spaces, theme, appHome, readTextFile, writeTextFile, props, closeOverlay } from "herdr";
+import { spaces, theme, appHome, readTextFile, writeTextFile, props, closeOverlay, run, updates } from "herdr";
 
 // Прокрутка с тонким полупрозрачным ползунком (2 px). Ширину встроенной полосы gpui задать не даёт, а смещение не отдаёт,
 // поэтому прокрутка своя, как в ленте чата: колесо и трекпад двигают содержимое, ползунок рисуется по тем же числам.
@@ -231,7 +231,16 @@ export default class Settings extends View {
     return v_flex().size_full().bg(t.popover ?? t.chrome).text_size(13).text_color(t.foreground)
       .child(h_flex().h(44).px(16).items_center().border_b(1).border_color(t.border)
         .child(icon("settings", 15))
-        .child(div().flex_1().pl(8).font_medium().child("Настройки панели"))
+        .child(div().flex_1().pl(8).font_medium().child("Настройки"))
+        .child(h_flex().id("machine-add").h(26).px(8).gap(6).items_center().rounded(6).cursor_pointer().text_color(t.muted)
+          .hover((s) => s.bg(t.hover)).tooltip("Подключить сервер по SSH. Клик — добавить машину")
+          .on_click(() => { close(); run("mod.open", { name: "machine-add" }); })
+          .child(icon("server", 13)).child("Машина"))
+        .child(h_flex().id("herdr-settings").relative().h(26).px(8).gap(6).items_center().rounded(6).cursor_pointer().text_color(t.muted)
+          .hover((s) => s.bg(t.hover)).tooltip("Настройки самого Herdr: тема, клавиши, обновления. Клик — открыть")
+          .on_click(() => { close(); run("app.settings"); })
+          .child(icon("sliders-horizontal", 13)).child("Herdr")
+          .when(Boolean(updates()?.app?.ready), (el) => el.child(div().size(6).rounded_full().bg(t.accent))))
         .child(btn("close", svg("mods/pane/close.svg").size(13).text_color(t.muted), "Закрыть", () => close())))
       .child(thin("projects", v_flex().id("projects").w_full().px(8).pb(8)
         .children(models)

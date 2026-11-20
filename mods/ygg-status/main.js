@@ -2,7 +2,7 @@
 // Вместо встроенного workspace-status: «This computer · N agents» убраны, подсказка палитры осталась.
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex } from "gpui-base";
-import { theme, run, window, keys, appHome, exec } from "herdr";
+import { theme, run, window, keys, appHome, exec, openOverlay, updates } from "herdr";
 
 const YELLOW = "#f5cd47";
 const NAME = { claude: "Claude", codex: "Codex", deepseek: "DeepSeek (LiteLLM)" };
@@ -80,7 +80,14 @@ export default class YggStatus extends View {
     const t = theme(), L = this.limits ?? {};
     const groups = ["claude", "codex", "deepseek"].map((k) => this.agent(k, L[k], t)).filter(Boolean);
     const sep = () => div().w(1).h(14).bg(t.border);
-    return h_flex().size_full().px(14).gap(14).items_center().bg(t.chrome).border_t(1).border_color(t.border).text_size(11.8).text_color(t.muted)
+    // Настройки — одна шестерёнка слева: в окне и Herdr, и добавить машину. Точка — готово обновление Herdr.
+    const gear = h_flex().id("settings").relative().size(22).items_center().justify_center().rounded(5).cursor_pointer()
+      .hover((s) => s.bg(t.hover)).tooltip("Настройки. Клик — открыть настройки")
+      .on_click(() => openOverlay({ mod: "ygg-settings", kind: "dialog", width: 640, height: 560 }))
+      .child(svg("mods/ygg-sidebar/icons/settings.svg").size(14).text_color(t.muted))
+      .when(Boolean(updates()?.app?.ready), (el) => el.child(div().absolute().top(2).right(2).size(6).rounded_full().bg(t.accent)));
+    return h_flex().size_full().pl(8).pr(14).gap(14).items_center().bg(t.chrome).border_t(1).border_color(t.border).text_size(11.8).text_color(t.muted)
+      .child(gear)
       .child(div().flex_1())
       .children(groups.flatMap((g, i) => (i ? [sep(), g] : [g])))
       .when(groups.length > 0, (el) => el.child(sep()))
