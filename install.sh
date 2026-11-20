@@ -1,5 +1,6 @@
 #!/bin/sh
-# Ставит моды в Herdr: свои — ссылками на этот клон (git pull обновляет сразу),
+# Ставит моды в Herdr: свои — копией в папку Herdr (после git pull запустить ещё раз; Herdr перечитывает мод только
+# при записи в свою папку, правки в клоне по ссылке он не видел до перезапуска),
 # правки встроенных модов (overrides/) — копией поверх, оригинал сохраняется как .orig.
 set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -7,8 +8,8 @@ HERDR=${HERDR_APP_HOME:-${HERDR_HOME:-$HOME/.config/herdr-app}}
 [ -d "$HERDR/mods" ] || { echo "Нет $HERDR/mods: Herdr не запускался или HERDR_APP_HOME другой"; exit 1; }
 for m in "$HERE"/mods/*/; do
   n=$(basename "$m"); dst="$HERDR/mods/$n"
-  [ -e "$dst" ] && [ ! -L "$dst" ] && mv "$dst" "$dst.bak.$(date +%s)"
-  ln -sfn "$HERE/mods/$n" "$dst"; echo "мод $n"
+  [ -L "$dst" ] && rm "$dst"
+  mkdir -p "$dst" && rsync -a --exclude jsconfig.json --exclude '*.d.ts' "$HERE/mods/$n/" "$dst/"; echo "мод $n"
 done
 for f in $(cd "$HERE/overrides" && find . -type f); do
   dst="$HERDR/mods/$f"

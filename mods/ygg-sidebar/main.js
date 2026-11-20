@@ -98,7 +98,6 @@ export default class YggSidebar extends View {
     this.known = {};
     this.cfg = { groups: ["Работа", "Личное"], projects: {} };
     this.folded = new Set(loadJSON("ygg.folded", []));
-    this.gfolded = new Set(loadJSON("ygg.gfolded", []));
     this.pins = new Set(loadJSON("ygg.pins", [])); // "p:<проект>", "s:<вкладка>"
     this.order = loadJSON("ygg.order", []); // проекты
     this.sorder = loadJSON("ygg.sorder", {}); // проект -> вкладки
@@ -151,7 +150,7 @@ export default class YggSidebar extends View {
 
   // Сессии проекта, начатые вне Herdr и ещё не открытые здесь.
   external(ss, taken) {
-    const d = shared("ygg.ext");
+    const d = this.ext;
     if (!d) return [];
     // Чат Herdr прячет свою сессию, только пока его вкладка открыта; старый формат (строки) — как раньше.
     const known = new Set([...(d.mac?.known ?? []).flatMap((k) => (typeof k === "string" ? [k] : this.openChats?.has(k.chat) ? [k.id] : [])), ...taken, ...(this.opening ?? [])]);
@@ -167,12 +166,17 @@ export default class YggSidebar extends View {
     return out.sort((a, b) => b.ext.at - a.ext.at);
   }
 
+  // Свёрнутые группы. Лениво: при перезагрузке мода на месте конструктор не перезапускается.
+  groupsFolded() { return (this.gfolded ??= new Set(loadJSON("ygg.gfolded", []))); }
+
   // Когда сессия заведена: из списка сессий агентов (born), иначе когда панель впервые увидела вкладку (запоминается).
   born(x, sid) {
-    const d = shared("ygg.ext");
+    const d = this.ext;
     if (this.bornRaw !== d) {
       this.bornRaw = d;
-      this.bornOf = new Map([...(d?.mac?.items ?? []), ...Object.values(d?.machines ?? {}).flatMap((m) => m?.items ?? [])].map((e) => [e.id, e.born ?? e.at]));
+      const all = [...(d?.mac?.items ?? []), ...Object.values(d?.machines ?? {}).flatMap((m) => m?.items ?? [])];
+      this.bornOf = new Map(all.map((e) => [e.id, e.born ?? e.at]));
+      this.titleOf = new Map(all.map((e) => [e.id, e.title]));
     }
     if (x.ext) return x.ext.born ?? x.ext.at;
     const id = sid(x), known = id && this.bornOf.get(id);
@@ -608,9 +612,9 @@ export default class YggSidebar extends View {
   // номером, когда её создали без имени; переименовываем один раз, чтобы и заголовок чата был нормальным.
   tabName(tab, info) {
     if (tab.name && !/^\d+$/.test(tab.name) && !UUID.test(tab.name)) return tab.name;
-    const d = shared("ygg.ext");
+    this.born({ ext: {} }, null); // сводка id → сессия на эту отрисовку
     const id = info.sleepId;
-    const title = info.title ?? (id && [...(d?.mac?.items ?? []), ...Object.values(d?.machines ?? {}).flatMap((m) => m?.items ?? [])].find((e) => e.id === id)?.title) ?? null;
+    const title = info.title ?? (id && this.titleOf?.get(id)) ?? null;
     if (!title) return tab.name;
     if (!this.popup && !this.menu && !this.smenu && !(this.renamed ??= new Set()).has(tab.id)) { this.renamed.add(tab.id); run("tab.rename", { id: tab.id, name: title.slice(0, 60) }); }
     return title;
@@ -681,7 +685,7 @@ export default class YggSidebar extends View {
     const taken = all.flatMap((i) => [i.info.sleepId, i.info.parked].filter(Boolean));
     const ext = this.external(ss.filter((x) => !this.cfg.projects?.[x.name]?.noExternal), taken);
     // Боковые сессии Claude — под родителем, как в Claude. Родитель — сессия списка или вкладка (спящая или чат).
-    const chatSid = new Map((shared("ygg.ext")?.mac?.known ?? []).filter((k) => typeof k !== "string").map((k) => [k.chat, k.id]));
+    const chatSid = new Map((this.ext?.mac?.known ?? []).filter((k) => typeof k !== "string").map((k) => [k.chat, k.id]));
     const sid = (x) => (x.ext ? x.ext.id : x.info.sleepId ?? chatSid.get(x.info.chatId) ?? null);
     const ids = new Set([...all.map(sid), ...ext.map(sid)].filter(Boolean));
     const kidsOf = new Map();
@@ -775,6 +779,7 @@ export default class YggSidebar extends View {
       }
       if (x.parent && x.state === "live") kids.set(x.parent, [...(kids.get(x.parent) ?? []), x]);
     }
+    this.ext = shared("ygg.ext"); // один разбор за отрисовку: shared() отдаёт копию, а сортировка звала его на каждое сравнение
     this.openChats = new Set([...all.map((x) => x.labels?.["herdr-chat.chat"]), ...ps.map((p) => p.props?.chat)].filter(Boolean));
     for (const p of ps) if (p.terminal && !tabTerms.has(p.tab)) { const x = all.find((y) => y.address === p.terminal); if (x) tabTerms.set(p.tab, [x]); }
     const projects = this.cfg.projects ?? {};
@@ -812,12 +817,12 @@ export default class YggSidebar extends View {
     // Заголовок группы: клик сворачивает всю группу (вся работа или все личные проекты разом), правый клик — настройки панели.
     // Свёрнутая группа показывает справа самое важное из своих сессий: ждущую или работающую видно и так.
     const header = (g, list = []) => {
-      const shut = this.gfolded.has(g);
+      const shut = this.groupsFolded().has(g);
       const lit = shut ? [...new Set(list.flatMap((r) => r.ss.flatMap((sp) => (sp.tabs ?? []).map((tab) => this.session(tab, tabTerms, ps, kids).status)))
         .filter((x) => x === "working" || x === "blocked"))] : [];
       return h_flex().id(`hdr-${g}`).h(26).px(8).pt(10).gap(4).flex_none().items_center().text_size(11).text_color(t.dim).cursor_pointer()
         .hover((st) => st.text_color(t.muted))
-        .on_click((_e, cx) => { shut ? this.gfolded.delete(g) : this.gfolded.add(g); save("ygg.gfolded", [...this.gfolded]); cx.notify(); })
+        .on_click((_e, cx) => { shut ? this.groupsFolded().delete(g) : this.groupsFolded().add(g); save("ygg.gfolded", [...this.gfolded]); cx.notify(); })
         .on_mouse_down("right", () => openOverlay({ mod: "ygg-settings", kind: "dialog", width: 640, height: 560 }))
         .child(g.toUpperCase())
         .child(svg(`${ICONS}/chevron-${shut ? "right" : "down"}.svg`).size(11).flex_none())
@@ -831,7 +836,7 @@ export default class YggSidebar extends View {
           .children(pinnedSorted.map(({ s, tab, info }) => this.sessionNode(s, tab, info, false, t, true))))
         .children(sections.flatMap(({ g, list }) => [
           header(g, list),
-          ...(this.gfolded.has(g) ? [] : list).map(({ s, ss, title, conf, group }) => this.project(s.name, title, ss, conf, group, tabTerms, ps, kids, t)),
+          ...(this.groupsFolded().has(g) ? [] : list).map(({ s, ss, title, conf, group }) => this.project(s.name, title, ss, conf, group, tabTerms, ps, kids, t)),
         ])));
   }
 }
