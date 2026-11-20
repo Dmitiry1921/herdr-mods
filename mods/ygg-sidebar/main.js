@@ -410,13 +410,16 @@ export default class YggSidebar extends View {
   }
 
   // Открыть сессию чатом во вкладке пространства (путь к файлу: у Claude по голому id заводится новая).
-  async openChat(spaceId, name, kind, cwd, session, machine = null) {
+  // split: {direction, pane?} — чат рядом с открытым в панели, а не новой вкладкой.
+  async openChat(spaceId, name, kind, cwd, session, machine = null, split = null) {
     // На сервере файл сессии не ищем: хост продолжает тред Codex по id в демоне машины.
     // DeepSeek (ACP) продолжает сессию по id, файла не ищем.
     const found = !machine && session && !session.startsWith("/") && kind !== "deepseek" ? (await ops("find", kind, session)).path : session;
     const remote = machine ? await sshTarget(machine) : null;
     const chat = `c-${randomBytes(4).toString("hex")}`;
-    run("tab.new", { space: spaceId, name, mod: "chat", props: { chat, provider: kind, cwd, session: found ?? session, ...(remote ? { remote } : {}) } });
+    const p = { chat, provider: kind, cwd, session: found ?? session, ...(remote ? { remote } : {}) };
+    if (split) run("pane.split", { ...split, mod: "chat", props: p });
+    else run("tab.new", { space: spaceId, name, mod: "chat", props: p });
     return chat;
   }
 
@@ -429,7 +432,7 @@ export default class YggSidebar extends View {
     const info = this.session(tab, tabTerms, ps, kids);
     const local = !s.machine, agent = Boolean(info.kind) && Boolean(info.chat || info.sleepId);
     const close = () => closeOverlay(props().overlay);
-    const why = !local ? "она на сервере" : "это не сессия агента";
+    const why = !local ? "она на сервере" : !(info.kind && (info.chat || info.sleepId)) ? "это не сессия агента" : "она уже открыта здесь";
     // Пункт меню: значок, подпись, справа — подсказка-стрелка. Недоступный — серый, в подсказке почему.
     const item = (id, icon, text, tip, act, on = true, right = null) => h_flex().id(id).h(28).px(8).gap(8).items_center().rounded(6)
       .text_color(on ? t.foreground : t.dim).when(!on, (el) => el.tooltip(`Недоступно: ${why}`))
@@ -472,6 +475,14 @@ export default class YggSidebar extends View {
         const r = id && await ops("fork", info.kind, id, cwd);
         if (r?.ok) this.openChat(s.id, `${tab.name ?? "Сессия"} · форк`, info.kind, cwd, r.path);
       }), local && agent))
+      // Рядом с открытым чатом: сессия переезжает из своей вкладки в панель справа или снизу (два чата на одну сессию нельзя).
+      .children(["right", "down"].map((dir) => item(`split-${dir}`, dir === "right" ? "split" : "split-down", dir === "right" ? "Открыть справа" : "Открыть снизу",
+        `Сессия рядом с открытым чатом, в той же вкладке. Клик — открыть ${dir === "right" ? "справа" : "снизу"}`, done(async () => {
+          const id = await this.sessionOf(info);
+          if (!id) return;
+          await this.openChat(s.id, tab.name, info.kind, cwd, id, null, { direction: dir });
+          if (!(tab.active && s.active)) run("tab.close", { id: tab.id, confirmed: true });
+        }), local && agent && !(tab.active && s.active))))
       .child(item("move", "folder-input", "Перенести в проект", "Сессия продолжится в другом проекте. Клик — выбрать проект",
         (cx) => { this.view = "move"; cx.notify(); }, local && agent, svg(`${ICONS}/chevron-right.svg`).size(12).text_color(t.dim)))
       .child(line())
@@ -667,7 +678,7 @@ export default class YggSidebar extends View {
     const row = this.draggable(h_flex().id(`${flat ? "pin" : "ses"}-${tab.id}`).relative().h(ROW).px(6).gap(8).items_center().rounded(6).cursor_pointer()
       .when(tab.active && s.active, (el) => el.bg(t.selected))
       .when(!(tab.active && s.active), (el) => el.hover((st) => st.bg(t.hover)))
-      .on_mouse_down("right", (e) => openOverlay({ mod: "ygg-sidebar", kind: "popup", width: 280, height: 235,
+      .on_mouse_down("right", (e) => openOverlay({ mod: "ygg-sidebar", kind: "popup", width: 280, height: 291,
         at: { x: e.position?.x ?? 40, y: e.position?.y ?? 80 }, props: { smenu: { tab: tab.id, space: s.id } } }))
       .on_hover((h, cx) => { this.hovered = h ? pkey : this.hovered === pkey ? null : this.hovered; cx.notify(); }), "s", tab.id, flat ? "__pins" : s.name, () => this.open(s, tab, info))
       .child(this.withGlobe(div().flex_none().when(sleeping, (el) => el.opacity(0.55)).child(this.agentIcon(info.kind, t)), remote ? s.machine : null, t))

@@ -234,12 +234,17 @@ export default class YggNew extends View {
         const remote = on ? await sshTarget(on) : null;
         // Вкладка чата только на этом Mac (herdr-chat ищет её в здешней раскладке): здешнее пространство проекта.
         const here = on ? (this.spaces().find((x) => !x.machine) ?? spaces().find((x) => !x.machine) ?? sp).id : sp.id;
-        run("tab.new", { space: here, name, mod: "chat", props: { chat, provider: this.agent, cwd, ...(remote ? { remote } : {}) } });
+        const cp = { chat, provider: this.agent, cwd, ...(remote ? { remote } : {}) };
+        // Из кнопки разделения в заголовке панели: чат рядом, в той же вкладке.
+        if (props()?.split) run("pane.split", { ...props().split, mod: "chat", props: cp });
+        else run("tab.new", { space: here, name, mod: "chat", props: cp });
         exec("sh", ["-c", RUN, `${appHome()}/mods/ygg-new/start.mjs`, chat, model, mode[this.agent] ?? "", text], { timeout: 90000 }).catch(() => {});
       } else {
         // Сюда доходит только Claude: Codex и на сервере открывается чатом.
         const argv = ["claude", ...(model ? ["--model", model] : []), "--permission-mode", mode.claude, text];
-        run("tab.new", { space: sp.id, name, argv: ["sh", "-c", 'cd "$0" && exec "$@"', cwd, ...argv] });
+        const av = ["sh", "-c", 'cd "$0" && exec "$@"', cwd, ...argv];
+        if (props()?.split) run("pane.split", { ...props().split, argv: av });
+        else run("tab.new", { space: sp.id, name, argv: av });
       }
       closeOverlay(props().overlay);
     } catch (e) {
