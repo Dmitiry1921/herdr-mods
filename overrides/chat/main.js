@@ -29,7 +29,7 @@ import { modeList } from "./modes.js";
 import { View, div } from "gpui-kit";
 import { fps_monitor } from "gpui-fps";
 import { v_flex, h_flex, Popup } from "gpui-base";
-import { agents, appHome, closeOverlay, focused, hc, home, nextCommand, notify, openOverlay, panes, props, run, settings, setShared, shared, spaces, terminals, theme, updates, window as appWindow } from "herdr";
+import { agents, appHome, closeOverlay, exec, focused, hc, home, nextCommand, notify, openOverlay, panes, props, run, settings, setShared, shared, spaces, terminals, theme, updates, window as appWindow } from "herdr";
 import { randomBytes } from "crypto";
 import { modPanes, readDoc } from "./place.js";
 import { getDoc, hideHost, locate } from "./hostpane.js";
@@ -389,6 +389,7 @@ export default class HerdrChat extends View {
     }
     if (this.conn.status === "connected" && this.store.loaded) this.syncTheme(cx);
     if (this.svgWanted?.size) this.loadSizes(cx);
+    if (this.mediaWanted?.size) this.loadMedia(cx);
     if (Date.now() - (this.sweptAt ?? 0) > 30000) this.sweepOrphans(cx);
     // Elapsed seconds (thinking, the activity line) while Pi works: data, once a second.
     const sec = Math.floor(Date.now() / 1000);
@@ -1516,6 +1517,35 @@ export default class HerdrChat extends View {
   // An SVG's natural size, from its viewBox / width / height (read once, off
   // render). Raster images come with theirs (items' `imageSizes`): the mod
   // can't read them (no fs.read grant), and a size read late would resize a drawn row.
+  // ygg: картинка, которую агент показал ссылкой на свой файл (/tmp/схема.png): image() видит только папку приложения,
+  // поэтому файл копируется в data/chat-media (имя — хэш пути и времени правки), размер — sips. null, пока не готово.
+  media(path) {
+    if (!path || !/\.(png|jpe?g|gif|webp)$/i.test(path)) return null;
+    this.mediaDone ??= new Map();
+    if (this.mediaDone.has(path)) return this.mediaDone.get(path);
+    (this.mediaWanted ??= new Set()).add(path);
+    return null;
+  }
+
+  loadMedia(cx) {
+    const want = [...this.mediaWanted];
+    this.mediaWanted.clear();
+    for (const p of want) this.mediaDone.set(p, null);
+    cx.spawn(async (cx) => {
+      const dir = `${appHome()}/data/chat-media`;
+      for (const p of want) {
+        try {
+          let h = 5381; for (const ch of p) h = ((h << 5) + h + ch.charCodeAt(0)) >>> 0;
+          const dst = `${dir}/${h.toString(36)}${p.slice(p.lastIndexOf(".")).toLowerCase()}`;
+          const r = await exec("sh", ["-c", 'mkdir -p "$2" && { [ "$1" -nt "$0" ] || cp "$0" "$1"; } && sips -g pixelWidth -g pixelHeight "$1"', p, dst, dir], { timeout: 15000 });
+          const w = Number(/pixelWidth: (\d+)/.exec(r.stdout)?.[1]), ht = Number(/pixelHeight: (\d+)/.exec(r.stdout)?.[1]);
+          if (w && ht) this.mediaDone.set(p, { path: dst, size: { w, h: ht } });
+        } catch {}
+      }
+      cx.notify();
+    });
+  }
+
   svgSize(path) {
     if (!path) return null;
     if (this.svgSizes.has(path)) return this.svgSizes.get(path);
@@ -2150,7 +2180,7 @@ export default class HerdrChat extends View {
       codeView: (key) => this.codeViews.get(key)?.entity ?? null,
       toggle: (id, cx) => this.toggle(id, cx), more: (id, cx) => this.more(id, cx),
       copy: (id, text, cx) => this.copy(id, text, cx), copied: (id) => this.copiedAt.has(id), quote: (text, cx) => this.quote(text, cx),
-      enlarge: (p, size, cx) => this.enlarge(p, size, cx), svgSize: (p) => this.svgSize(p), traceThumb: (p, w, h) => this.thumbsSeen?.add(p, w, h),
+      enlarge: (p, size, cx) => this.enlarge(p, size, cx), media: (p) => this.media(p), openPath: (p) => { exec("open", [p]).catch(() => {}); }, svgSize: (p) => this.svgSize(p), traceThumb: (p, w, h) => this.thumbsSeen?.add(p, w, h),
       openFile: (p, line, cx) => this.openFile(p, line, cx), editResend: (it, cx) => this.editResend(it, cx),
       setHover: (id, on, cx) => this.setHover(id, on, cx), svgHover: this.svgHover ?? null,
       setSvgHover: (key, on, cx) => this.setSvgHover(key, on, cx), groupOpen: (id) => this.groups.get(id),

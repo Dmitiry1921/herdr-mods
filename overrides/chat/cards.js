@@ -105,18 +105,48 @@ function hoverable(el, it, c) {
   return el.id(`msg-${it.id}`).on_hover((h, cx) => c.setHover(it.id, h, cx));
 }
 
+// ygg: сообщение из приложения Codex с вложениями приходит обёрнутым: «# Files mentioned by the user:», по разделу
+// «## имя: путь» на файл, потом «## My request:» и набранный текст. Пузырь — только текст, файлы — карточками над ним.
+// Картинки и так приходят своими частями (imagePaths), их карточкой не дублируем.
+function unwrapApp(text) {
+  const m = /^\s*# Files mentioned by the user:\s*\n([\s\S]*?)\n## My request(?: for Codex)?:[ \t]*\n([\s\S]*)$/.exec(text ?? "");
+  if (!m) return { text, files: [] };
+  const files = [...m[1].matchAll(/^## [^\n]*?: (\/[^\n]+)\n((?:(?!## )[^\n]*\n?)*)/gm)]
+    .filter((f) => !/Image attachment: true/.test(f[2] ?? "")).map((f) => f[1].trim());
+  return { text: m[2].trim(), files };
+}
+
+const FILE_TONE = { pdf: "#e5534b", doc: "#4c8bf5", docx: "#4c8bf5", xls: "#2abb7f", xlsx: "#2abb7f", csv: "#2abb7f", zip: "#c69026" };
+
+// Приложенный файл, как в Codex: значок типа, имя, тип. Клик — открыть системой.
+function fileCard(id, path, c) {
+  const t = c.t;
+  const name = path.split("/").pop();
+  const ext = name.includes(".") ? name.split(".").pop().toLowerCase() : "";
+  return h_flex().id(id).flex_none().h(56).pl(8).pr(14).gap(10).items_center().rounded(14).cursor_pointer()
+    .bg(t.selected ?? t.raised).border_1().border_color(t.border).hover((st) => st.border_color(alpha(t.foreground, 0.2)))
+    .tooltip(`${path}\nКлик — открыть`).on_click(() => c.openPath?.(path))
+    .child(div().size(40).flex_none().rounded(10).bg(t.background).flex().items_center().justify_center()
+      .text_color(FILE_TONE[ext] ?? t.muted).child(icon("file-text", 18)))
+    .child(v_flex().min_w(0).max_w(220)
+      .child(div().truncate().text_size(13.5).text_color(t.foreground).child(name))
+      .child(div().text_size(12).text_color(t.dim).child(ext ? ext.toUpperCase() : "Файл")));
+}
+
 function user(it, c) {
   const t = c.t;
   const env = unwrapHc(it.text);
   const from = it.from ?? env.from;
-  const text = env.from ? env.text : it.text;
+  const app = unwrapApp(env.from ? env.text : it.text);
+  const text = app.text;
   if (from) return report(it, from, text, c); // an `hc send` report (external, or queued first)
   const tags = [];
   if (from) tags.push(h_flex().gap(4).items_center().child(icon("message", 11)).child(`from ${from}`));
   else if (it.source === "external") tags.push(div().child("from outside"));
   else if (it.source === "extension") tags.push(div().child("from an extension"));
   else if (it.source === "queued") tags.push(div().child("queued"));
-  if (it.images) tags.push(h_flex().gap(4).items_center().child(icon("image", 11)).child(plural(it.images, "image")));
+  // картинки видны превью над пузырём: подпись «N image» не нужна, только если превью нет (старый хост без путей)
+  if (it.images && !it.imagePaths?.length) tags.push(h_flex().gap(4).items_center().child(icon("image", 11)).child(plural(it.images, "image")));
   // The actions sit left of the bubble, on its last line: no extra height.
   const b = SPACE.bubble;
   const body = (key) => div().text_size(14).line_height(`${SPACE.lineH}px`).child(prose(`md-${it.id}${key}`, text || " "));
@@ -134,11 +164,14 @@ function user(it, c) {
   else content = [h_flex().child(skillPill(it, c)), ...skillBody, body("-s")];
   return hoverable(h_flex().gap(6).items_end().justify_end(), it, c)
     .child(div().flex_none().pb(2).child(actions(it, null, c, { align: "end", text: typedText(it, text) })))
-    // ygg: пузырь человека заметен на фоне чата: светлее фона и с рамкой, ответы агента идут без пузыря.
-    .child(v_flex().max_w(Math.round(c.colW * 0.85)).gap(6).px(b.x).py(b.y).rounded(b.r).bg(t.selected ?? t.raised).border_1().border_color(t.border)
-      .when(tags.length > 0, (e) => e.child(h_flex().gap(8).text_size(11).text_color(t.dim).children(tags)))
-      .children(content)
-      .children([images(it.imagePaths, it.imageSizes, it.id, c)].filter(Boolean)));
+    // ygg: вложения над пузырём, как в Codex: превью картинок и карточки файлов, в пузыре только текст.
+    // Пузырь человека заметен на фоне чата: светлее фона и с рамкой, ответы агента идут без пузыря.
+    .child(v_flex().max_w(Math.round(c.colW * 0.85)).gap(8).items_end()
+      .when(Boolean(it.imagePaths?.length) || app.files.length > 0, (e) => e.child(h_flex().gap(8).flex_wrap().justify_end()
+        .children([images(it.imagePaths, it.imageSizes, it.id, c), ...app.files.map((p, j) => fileCard(`file-${it.id}-${j}`, p, c))].filter(Boolean))))
+      .when(Boolean(text) || Boolean(skill) || tags.length > 0, (e) => e.child(v_flex().gap(6).px(b.x).py(b.y).rounded(b.r).bg(t.selected ?? t.raised).border_1().border_color(t.border)
+        .when(tags.length > 0, (x) => x.child(h_flex().gap(8).text_size(11).text_color(t.dim).children(tags)))
+        .children(content))));
 }
 
 // The skill a message ran: a tinted pill with its name. Its file shows on

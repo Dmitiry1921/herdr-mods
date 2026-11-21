@@ -8,7 +8,7 @@ import { div, image } from "gpui-kit";
 import { appHome, exec } from "herdr";
 import { openUrl } from "./links.js";
 import { v_flex, h_flex, TextView } from "gpui-base";
-import { alpha, codeLine, homeRel, icon, plural, spinner } from "./util.js";
+import { alpha, codeLine, homeRel, icon, plural, spinner, thumbnail } from "./util.js";
 import { SPACE } from "./space.js";
 
 export const CODE_CAP = 30; // lines shown before "Show all N lines"
@@ -94,6 +94,16 @@ export function blocks(it, c) {
     if (b.type === "code") el = (!b.open && c.codeView?.(key)) || codeCard(key, b.lang, b.code ?? "", b.lines, b.open, c);
     else if (b.type === "mermaid") el = mermaid(key, b, c);
     else el = c.codeView?.(key) || markdown(`md-${it.id}-${i}`, b.text);
+    // ygg: картинка, на которую агент сослался (![…](/путь.png) или [Открыть схему](/путь.png)), видна в ответе, как в Codex.
+    const pics = b.type === "markdown" ? [...new Set([...(b.text ?? "").matchAll(/\]\((?:file:\/\/)?(\/[^)\s]+\.(?:png|jpe?g|gif|webp))\)/gi)].map((m) => m[1]))] : [];
+    const shown = pics.map((p) => c.media?.(p)).filter(Boolean);
+    if (shown.length) {
+      const maxW = Math.min(560, c.colW ?? 560);
+      el = v_flex().gap(10).child(el).children(shown.map((m, j) => {
+        const k = Math.min(1, maxW / m.size.w, 420 / m.size.h);
+        return thumbnail(`pic-${it.id}-${i}-${j}`, m, Math.round(m.size.w * k), Math.round(m.size.h * k), c);
+      }).filter(Boolean));
+    }
     return div().pt(gap).child(el);
   }));
 }
