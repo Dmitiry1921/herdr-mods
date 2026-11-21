@@ -28,7 +28,15 @@ const openLink = (url, base) => {
   else if (!p.startsWith("/") && base) p = `${base.replace(/\/$/, "")}/${p.replace(/^\.\//, "")}`;
   if (p.startsWith("/")) exec("open", [p]).catch(() => {});
 };
-export const prose = (id, text, base = null) => TextView.markdown(id, text).selectable(true).on_link_click((url) => openLink(url, base));
+// Текстовый виджет отдаёт в on_link_click только адреса со схемой: ссылка путём от папки чата (models/x.solidcraft)
+// рисовалась ссылкой, но клик не приходил. Такие пути до отрисовки становятся file:// с полным путём.
+const absLinks = (text, base) => text.replace(/\]\((?![a-z][\w+.-]*:|#)(<[^>]+>|[^)\s]+)\)/gi, (m, raw) => {
+  let p = raw.replace(/^<|>$/g, "");
+  if (p.startsWith("~/")) p = `${appHome().replace(/\/\.config\/herdr-app$/, "")}/${p.slice(2)}`;
+  else if (!p.startsWith("/")) { if (!base) return m; p = `${base.replace(/\/$/, "")}/${p.replace(/^\.\//, "")}`; }
+  return `](file://${encodeURI(p)})`;
+});
+export const prose = (id, text, base = null) => TextView.markdown(id, absLinks(text, base)).selectable(true).on_link_click((url) => openLink(url, base));
 
 // Markdown → the chunks drawn one TextView each, so the space between
 // paragraphs, lists, tables and headings is ours (space.js), not the
