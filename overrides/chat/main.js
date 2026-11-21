@@ -392,6 +392,7 @@ export default class HerdrChat extends View {
     if (this.conn.status === "connected" && this.store.loaded) this.syncTheme(cx);
     if (this.svgWanted?.size) this.loadSizes(cx);
     if (this.mediaWanted?.size) this.loadMedia(cx);
+    if (this.thumbJobs?.length) this.loadThumbs(cx);
     if (Date.now() - (this.sweptAt ?? 0) > 30000) this.sweepOrphans(cx);
     // Elapsed seconds (thinking, the activity line) while Pi works: data, once a second.
     const sec = Math.floor(Date.now() / 1000);
@@ -1548,6 +1549,38 @@ export default class HerdrChat extends View {
     return null;
   }
 
+  // ygg: квадратная миниатюра 192×192 (по центру, как object-fit: cover) для ряда картинок в сообщении: у image()
+  // нет обрезки, поэтому квадрат режется заранее через sips в data/chat-media/thumb-<хэш>.jpg. null, пока не готова.
+  thumb(path) {
+    if (!path || !/\.(png|jpe?g|gif|webp|heic|heif)$/i.test(path)) return null;
+    this.thumbDone ??= new Map();
+    if (this.thumbDone.has(path)) return this.thumbDone.get(path);
+    this.thumbDone.set(path, null);
+    let h = 5381; for (const ch of path) h = ((h << 5) + h + ch.charCodeAt(0)) >>> 0;
+    const dst = `${appHome()}/data/chat-media/thumb-${h.toString(36)}.jpg`;
+    // $0 — картинка, $1 — миниатюра; после set: $1 $2 — они же, $3 $4 — ширина и высота.
+    const sh = 'mkdir -p "$(dirname "$1")"; [ "$1" -nt "$0" ] && exit 0; ' +
+      'set -- "$0" "$1" $(sips -g pixelWidth -g pixelHeight "$0" | awk \'/pixel/{print $2}\'); ' +
+      'if [ "$3" -gt "$4" ]; then r=--resampleHeight; else r=--resampleWidth; fi; ' +
+      'sips -s format jpeg "$r" 192 "$1" --out "$2" >/dev/null && sips -c 192 192 "$2" >/dev/null && [ -s "$2" ]';
+    this.thumbJobs ??= [];
+    this.thumbJobs.push({ path, dst, sh });
+    return null;
+  }
+
+  loadThumbs(cx) {
+    const jobs = this.thumbJobs.splice(0);
+    cx.spawn(async (cx) => {
+      for (const j of jobs) {
+        try {
+          await exec("sh", ["-c", j.sh, j.path, j.dst], { timeout: 20000 });
+          this.thumbDone.set(j.path, homeRel(j.dst, appHome()));
+        } catch {}
+      }
+      cx.notify();
+    });
+  }
+
   loadMedia(cx) {
     const want = [...this.mediaWanted];
     this.mediaWanted.clear();
@@ -2201,7 +2234,7 @@ export default class HerdrChat extends View {
       codeView: (key) => this.codeViews.get(key)?.entity ?? null,
       toggle: (id, cx) => this.toggle(id, cx), more: (id, cx) => this.more(id, cx),
       copy: (id, text, cx) => this.copy(id, text, cx), copied: (id) => this.copiedAt.has(id), quote: (text, cx) => this.quote(text, cx),
-      enlarge: (p, size, cx, list) => this.enlarge(p, size, cx, list), media: (p) => this.media(p), openPath: (p) => { exec("open", [p]).catch(() => {}); }, svgSize: (p) => this.svgSize(p), traceThumb: (p, w, h) => this.thumbsSeen?.add(p, w, h),
+      enlarge: (p, size, cx, list) => this.enlarge(p, size, cx, list), media: (p) => this.media(p), thumb: (p) => this.thumb(p), openPath: (p) => { exec("open", [p]).catch(() => {}); }, svgSize: (p) => this.svgSize(p), traceThumb: (p, w, h) => this.thumbsSeen?.add(p, w, h),
       openFile: (p, line, cx) => this.openFile(p, line, cx), editResend: (it, cx) => this.editResend(it, cx),
       setHover: (id, on, cx) => this.setHover(id, on, cx), svgHover: this.svgHover ?? null,
       setSvgHover: (key, on, cx) => this.setSvgHover(key, on, cx), groupOpen: (id) => this.groups.get(id),
