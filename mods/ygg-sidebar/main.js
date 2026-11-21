@@ -915,12 +915,15 @@ export default class YggSidebar extends View {
     if (this.smenu) return this.sessionMenu(rows, tabTerms, ps, kids, t);
     if (this.popup) {
       const r = rows.find((x) => x.s.name === this.popup);
-      return v_flex().id("ygg-pop").size_full().min_h(0).bg(t.popover ?? t.chrome).p(6).text_size(13)
+      // Всплывашка по размеру содержимого: список внутри thin() стоит абсолютно и своей высоты не даёт, поэтому
+      // высота — измеренная высота списка (первый кадр 200), не больше 548; длиннее — прокрутка.
+      const ph = Math.min(548, SCROLL.get("ygg-pop-list")?.content || 200);
+      return v_flex().id("ygg-pop").w_full().bg(t.popover ?? t.chrome).p(6).text_size(13)
         .on_hover((h, cx) => {
           setShared("ygg.popHover", h);
           if (!h) cx.spawn(async (cx) => { await cx.sleep(350); if (!shared("ygg.popHover")) closeOverlay(props().overlay); });
         })
-        .child(r ? thin("ygg-pop-list", v_flex().id("ygg-pop-list").w_full().child(this.project(r.s.name, r.title, r.ss, r.conf, r.group, tabTerms, ps, kids, t)), true) : div());
+        .child(r ? thin("ygg-pop-list", v_flex().id("ygg-pop-list").w_full().child(this.project(r.s.name, r.title, r.ss, r.conf, r.group, tabTerms, ps, kids, t)), ph) : div());
     }
     if (narrow()) return this.rail(sections, tabTerms, ps, kids, t);
     // Заголовок группы: клик сворачивает всю группу (вся работа или все личные проекты разом), правый клик — настройки панели.
