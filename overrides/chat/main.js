@@ -1524,13 +1524,14 @@ export default class HerdrChat extends View {
   }
 
   // An image or diagram, big, in a dialog over the window.
-  enlarge(path, size, cx) {
+  // `list`: все картинки сообщения [{path, size}], тогда в окне они листаются ← →.
+  enlarge(path, size, cx, list = null) {
     const rel = homeRel(path, appHome());
     if (!rel) return this.flash("Can't show a file outside the app's folder", cx);
     const w = Math.min(1400, Math.max(320, (size?.w ?? 900) + 48));
     const h = Math.min(1000, Math.max(240, (size?.h ?? 600) + 80));
     this.enlarged = path;
-    openOverlay({ mod: MOD, kind: "dialog", width: 0.85, height: 0.85, props: { viewer: { path: rel, w: size?.w ?? null, h: size?.h ?? null, want: [w, h] } } });
+    openOverlay({ mod: MOD, kind: "dialog", width: 0.85, height: 0.85, props: { viewer: { path: rel, w: size?.w ?? null, h: size?.h ?? null, want: [w, h], ...gallery(path, list) } } });
     this.debug.mark();
   }
 
@@ -2200,7 +2201,7 @@ export default class HerdrChat extends View {
       codeView: (key) => this.codeViews.get(key)?.entity ?? null,
       toggle: (id, cx) => this.toggle(id, cx), more: (id, cx) => this.more(id, cx),
       copy: (id, text, cx) => this.copy(id, text, cx), copied: (id) => this.copiedAt.has(id), quote: (text, cx) => this.quote(text, cx),
-      enlarge: (p, size, cx) => this.enlarge(p, size, cx), media: (p) => this.media(p), openPath: (p) => { exec("open", [p]).catch(() => {}); }, svgSize: (p) => this.svgSize(p), traceThumb: (p, w, h) => this.thumbsSeen?.add(p, w, h),
+      enlarge: (p, size, cx, list) => this.enlarge(p, size, cx, list), media: (p) => this.media(p), openPath: (p) => { exec("open", [p]).catch(() => {}); }, svgSize: (p) => this.svgSize(p), traceThumb: (p, w, h) => this.thumbsSeen?.add(p, w, h),
       openFile: (p, line, cx) => this.openFile(p, line, cx), editResend: (it, cx) => this.editResend(it, cx),
       setHover: (id, on, cx) => this.setHover(id, on, cx), svgHover: this.svgHover ?? null,
       setSvgHover: (key, on, cx) => this.setSvgHover(key, on, cx), groupOpen: (id) => this.groups.get(id),
@@ -2421,6 +2422,12 @@ function withProgram(argv, prog) {
 
 // Per-key choices that outlive the chat: statuses hidden from the footer,
 // widgets left open (localStorage, per mod copy).
+function gallery(path, list) {
+  const items = (list ?? []).map((x) => ({ path: homeRel(x.path, appHome()), w: x.size?.w ?? null, h: x.size?.h ?? null })).filter((x) => x.path);
+  const at = items.findIndex((x) => x.path === homeRel(path, appHome()));
+  return items.length > 1 && at >= 0 ? { list: items, at } : {};
+}
+
 function loadPrefs() {
   try {
     const p = JSON.parse(localStorage.getItem("herdr-chat.prefs") ?? "{}");

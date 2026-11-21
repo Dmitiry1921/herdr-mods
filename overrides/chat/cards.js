@@ -63,17 +63,21 @@ export function item(it, c, footer, slot = true) {
 // (outside the app home) is a named chip.
 function images(paths, sizes, owner, c) {
   if (!paths?.length) return null;
-  const maxW = Math.min(320, c.colW * 0.6);
+  // ygg: несколько картинок — ряд миниатюр по 120 px высотой, как в Codex; одна — до 320. Клик открывает
+  // окно просмотра, где все картинки сообщения листаются ← →.
+  const many = paths.length > 1, box = many ? 120 : 320;
+  const maxW = many ? 200 : Math.min(320, c.colW * 0.6);
+  const list = paths.map((p, j) => ({ path: p, size: sizes?.[j] ?? null }));
   return h_flex().gap(8).flex_wrap().children(paths.map((path, i) => {
     const size = sizes?.[i] ?? null;
-    const k = size && Math.min(1, maxW / size.w, 320 / size.h);
-    const [w, h] = (size ? [size.w * k, size.h * k] : [maxW, (maxW * 10) / 16]).map((v) => Math.max(1, Math.round(v)));
+    const k = size && Math.min(1, maxW / size.w, box / size.h);
+    const [w, h] = (size ? [size.w * k, size.h * k] : many ? [box, box] : [maxW, (maxW * 10) / 16]).map((v) => Math.max(1, Math.round(v)));
     // ygg: без рамки, углы скруглены на самой картинке — так же, как картинки в ответе агента (rich.js)
     const rel = homeRel(path, appHome());
     if (rel) c.traceThumb?.(path, w, h);
     return (rel ? h_flex().id(`img-${owner}-${i}`).flex_none().rounded(12).cursor_pointer()
-      .on_click((_e, cx) => c.enlarge(path, size, cx)).child(image(rel).rounded(12).w(w).h(h)) : null)
-      ?? fileChip(`img-${owner}-${i}`, path.split("/").pop(), c.t).cursor_pointer().on_click((_e, cx) => c.enlarge(path, size, cx));
+      .on_click((_e, cx) => c.enlarge(path, size, cx, list)).child(image(rel).rounded(many ? 10 : 12).w(w).h(h)) : null)
+      ?? fileChip(`img-${owner}-${i}`, path.split("/").pop(), c.t).cursor_pointer().on_click((_e, cx) => c.enlarge(path, size, cx, list));
   }));
 }
 
