@@ -5,6 +5,7 @@ import { h_flex } from "gpui-base";
 import { theme, run, window, keys, appHome, exec, openOverlay, updates } from "herdr";
 
 const YELLOW = "#f5cd47";
+const alpha = (c, a) => (typeof c === "string" && /^#[0-9a-f]{6}$/i.test(c) ? c + Math.round(a * 255).toString(16).padStart(2, "0") : c);
 const NAME = { claude: "Claude", codex: "Codex", deepseek: "DeepSeek (LiteLLM)" };
 const RUN = 'n=$(ls -d "$HOME"/.nvm/versions/node/*/bin/node 2>/dev/null | tail -1); exec "${n:-node}" "$0" "$@"';
 const WD = ["воскресенье", "понедельник", "вторник", "среду", "четверг", "пятницу", "субботу"];
@@ -19,8 +20,36 @@ const when = (sec) => { const d = new Date(sec * 1000); return `${d - Date.now()
 export default class YggStatus extends View {
   init(_p, cx) {
     this.limits = null;
+    this.upd = null; // {behind, log} — новые версии модов на GitHub
+    this.updating = false;
     this.fetch(cx);
     cx.timer.every(30000, (cx) => this.fetch(cx));
+    this.check(cx);
+    cx.timer.every(120000, (cx) => this.check(cx));
+  }
+
+  // Новые версии модов на GitHub: ставятся только кнопкой, пока ты не нажал, ничего не перезагружается.
+  check(cx) {
+    cx.spawn(async (cx) => {
+      try {
+        const r = await exec("sh", [`${appHome()}/mods/ygg-status/update.sh`, "check"], { timeout: 30000 });
+        const u = JSON.parse(r.stdout || "null");
+        if (u && JSON.stringify(u) !== JSON.stringify(this.upd)) { this.upd = u; cx.notify(); }
+      } catch {}
+    });
+  }
+
+  update(cx) {
+    if (this.updating) return;
+    this.updating = true;
+    cx.notify();
+    cx.spawn(async (cx) => {
+      // После установки этот мод перезагрузится сам; если в нём ничего не поменялось — снимаем кнопку здесь.
+      await exec("sh", [`${appHome()}/mods/ygg-status/update.sh`, "apply"], { timeout: 120000 }).catch(() => {});
+      this.updating = false;
+      this.upd = null;
+      cx.notify();
+    });
   }
 
   fetch(cx) {
@@ -86,8 +115,17 @@ export default class YggStatus extends View {
       .on_click(() => openOverlay({ mod: "ygg-settings", kind: "dialog", width: 640, height: 560 }))
       .child(svg("mods/ygg-sidebar/icons/settings.svg").size(14).text_color(t.muted))
       .when(Boolean(updates()?.app?.ready), (el) => el.child(div().absolute().top(2).right(2).size(6).rounded_full().bg(t.accent)));
+    const n = this.upd?.behind ?? 0;
+    const tipUpd = `Обновление интерфейса: ${n} ${n % 10 === 1 && n % 100 !== 11 ? "изменение" : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20) ? "изменения" : "изменений"}`
+      + `${this.upd?.log?.length ? `\n${this.upd.log.map((x) => `• ${x.split(":")[0]}`).join("\n")}` : ""}`
+      + "\nКлик — поставить. Панели перезагрузятся: допиши сообщение до клика";
+    const upd = n > 0 || this.updating ? h_flex().id("ygg-update").h(20).px(8).gap(5).items_center().rounded(10).cursor_pointer()
+      .bg(alpha(t.accent, 0.18)).text_color(t.accent).hover((s) => s.bg(alpha(t.accent, 0.28)))
+      .tooltip(this.updating ? "Ставлю обновление" : tipUpd).on_click((_e, cx) => this.update(cx))
+      .child(svg("mods/ygg-status/icons/download.svg").size(12)).child(this.updating ? "Обновляю…" : "Обновить") : null;
     return h_flex().size_full().pl(8).pr(14).gap(14).items_center().bg(t.chrome).border_t(1).border_color(t.border).text_size(11.8).text_color(t.muted)
       .child(gear)
+      .when(Boolean(upd), (el) => el.child(upd))
       .child(div().flex_1())
       .children(groups.flatMap((g, i) => (i ? [sep(), g] : [g])))
       .when(groups.length > 0, (el) => el.child(sep()))
