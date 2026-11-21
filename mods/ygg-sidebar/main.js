@@ -631,9 +631,10 @@ export default class YggSidebar extends View {
   slot(el) { return div().w(14).flex_none().flex().items_center().justify_center().when(Boolean(el), (d) => d.child(el)); }
 
   // Кнопки строки появляются при наведении левее значка статуса: он остаётся виден, и на нём подсказка, что он значит.
-  actions(buttons, bg) {
+  // `keep`: в колонке статуса что-то есть, кнопки встают левее; пустая колонка — кнопки у самого края строки.
+  actions(buttons, bg, keep = true) {
     // Подсветка строки полупрозрачная: под кнопками сплошной фон панели, иначе сквозь них видно название.
-    return div().absolute().right(24).top(0).bottom(0).rounded(6).bg(theme().chrome)
+    return div().absolute().right(keep ? 24 : 0).top(0).bottom(0).rounded(6).bg(theme().chrome)
       .child(h_flex().h_full().pl(6).pr(4).gap(2).items_center().rounded(6).bg(bg).children(buttons));
   }
 
@@ -678,6 +679,7 @@ export default class YggSidebar extends View {
     const sleeping = !info.status;
     const tip = info.status ? TIP[info.status] : remote ? TIP.remote : info.parked ? TIP.parked : "Терминал. Клик — открыть вкладку";
     const pkey = `s:${tab.id}`;
+    const mk = this.mark(info, remote, t);
     const row = this.draggable(h_flex().id(`${flat ? "pin" : "ses"}-${tab.id}`).relative().h(ROW).px(6).gap(8).items_center().rounded(6).cursor_pointer()
       .when(tab.active && s.active, (el) => el.bg(t.selected))
       .when(!(tab.active && s.active), (el) => el.hover((st) => st.bg(t.hover)))
@@ -687,8 +689,8 @@ export default class YggSidebar extends View {
       .child(this.withGlobe(div().flex_none().when(sleeping, (el) => el.opacity(0.55)).child(this.agentIcon(info.kind, t)), remote ? s.machine : null, t))
       .child(div().flex_1().min_w(0).truncate().text_color(sleeping ? t.dim : t.foreground).child(label(this.tabName(tab, info), info.kind)))
       .when(flat, (el) => el.child(div().flex_none().max_w(90).truncate().text_size(11).text_color(t.dim).child((this.cfg.projects?.[s.name]?.alias) ?? s.name)))
-      .child(div().id(`st-${flat ? "pin" : "ses"}-${tab.id}`).flex_none().tooltip(tip).child(this.slot(this.mark(info, remote, t))))
-      .when(this.hovered === pkey, (el) => el.child(this.actions([this.pinButton(pkey, t, true)], tab.active && s.active ? t.selected : t.hover)));
+      .child(div().id(`st-${flat ? "pin" : "ses"}-${tab.id}`).flex_none().tooltip(tip).child(this.slot(mk)))
+      .when(this.hovered === pkey, (el) => el.child(this.actions([this.pinButton(pkey, t, true)], tab.active && s.active ? t.selected : t.hover, Boolean(mk))));
     if (flat) return row;
     const subs = info.subs.map((k, i) => v_flex().relative()
       .child(this.branch(i === info.subs.length - 1))
@@ -727,7 +729,7 @@ export default class YggSidebar extends View {
       // Свёрнутый проект показывает в колонке статуса самое важное из своих сессий.
       .child(this.slot(folded && lit.length ? this.mark({ status: top(lit) }, false, t) : null))
       .when(this.hovered === pkey, (el) => el.child(this.actions([
-        ...(this.popup ? [] : [this.newButton(ss, title, conf, t, true)]), this.pinButton(pkey, t, true)], t.hover)));
+        ...(this.popup ? [] : [this.newButton(ss, title, conf, t, true)]), this.pinButton(pkey, t, true)], t.hover, Boolean(folded && lit.length))));
     // Как в Codex: активные видны всегда, спящие добирают до N (visible в projects.json, по умолчанию 5),
     // остальные под «Показать больше».
     const limit = conf.visible ?? this.cfg.visible ?? 5;
