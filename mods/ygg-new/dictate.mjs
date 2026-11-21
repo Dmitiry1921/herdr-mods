@@ -17,6 +17,8 @@ const MODEL = `${H}/.cache/whisper-cpp/ggml-large-v3-turbo.bin`;
 const RATE = 16000, BYTES = 2; // моно, 16 бит
 const sleep = (/** @type {number} */ ms) => new Promise((r) => setTimeout(r, ms));
 const put = (ext, s) => { fs.writeFileSync(`${base}.${ext}.tmp`, s); fs.renameSync(`${base}.${ext}.tmp`, `${base}.${ext}`); };
+// Файлы — под ~/.config/herdr-app/data/dictate: моды Herdr читают только в домашней папке и пишут только туда.
+fs.mkdirSync(base.slice(0, base.lastIndexOf("/")), { recursive: true });
 for (const e of ["pcm", "txt", "stop", "done", "err", "lvl"]) fs.rmSync(`${base}.${e}`, { force: true });
 
 const port = 47600 + Math.floor(Math.random() * 300);
@@ -56,7 +58,7 @@ async function hear() {
   return { len: pcm.length, text };
 }
 
-// Громкость для волны под полем ввода: раз в 80 мс RMS последних 50 мс записи, последние 48 значений 0..1 в <base>.lvl.
+// Громкость для волны под полем ввода: раз в 80 мс громкость последних 50 мс записи, последние 48 значений 0..1 в <base>.lvl.
 const levels = [];
 setInterval(() => {
   try {
@@ -65,7 +67,9 @@ setInterval(() => {
       const size = fs.fstatSync(fd).size, n = Math.min(size - (size % BYTES), RATE * BYTES * 0.05);
       const b = Buffer.alloc(n); fs.readSync(fd, b, 0, n, size - (size % BYTES) - n);
       let sum = 0; for (let i = 0; i < n; i += 2) { const v = b.readInt16LE(i) / 32768; sum += v * v; }
-      levels.push(Math.min(1, Math.sqrt(sum / Math.max(1, n / 2)) * 6));
+      // по децибелам: тишина (-60 дБ) — 0, обычная речь (-35…-20 дБ) — середина и выше
+      const db = 20 * Math.log10(Math.sqrt(sum / Math.max(1, n / 2)) || 1e-9);
+      levels.push(Math.max(0, Math.min(1, (db + 60) / 45)));
     } finally { fs.closeSync(fd); }
   } catch { levels.push(0); }
   if (levels.length > 48) levels.shift();

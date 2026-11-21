@@ -170,7 +170,7 @@ export default class YggNew extends View {
   // Диктовка с текстом по ходу речи: dictate.mjs (ffmpeg + whisper-server) пишет растущий текст в <base>.txt,
   // мод раз в четверть секунды ставит его в поле после того, что было набрано до записи. Второй клик — стоп.
   dictate(cx) {
-    const base = `/tmp/herdr-dictate-new-${(this.dictId ??= Math.random().toString(36).slice(2, 8))}`;
+    const base = `${appHome()}/data/dictate/new-${(this.dictId ??= Math.random().toString(36).slice(2, 8))}`;
     if (this.dict === "rec") {
       this.dict = "busy";
       fs.writeFile(`${base}.stop`, "1").catch(() => {});

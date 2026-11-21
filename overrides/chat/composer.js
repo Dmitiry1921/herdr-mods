@@ -180,7 +180,7 @@ export class Composer {
   // пишет растущий текст в <base>.txt, поле раз в четверть секунды показывает его после набранного до записи.
   // Второй клик останавливает запись, последний проход уточняет текст.
   dictate(cx) {
-    const base = `/tmp/herdr-dictate-${(this.dictId ??= Math.random().toString(36).slice(2, 8))}`;
+    const base = `${appHome()}/data/dictate/${(this.dictId ??= Math.random().toString(36).slice(2, 8))}`;
     if (this.dict === "rec") {
       this.dict = "busy";
       fs.writeFile(`${base}.stop`, "1").catch(() => {});
@@ -226,8 +226,8 @@ export class Composer {
     const lv = this.levels ?? [];
     const pad = Array(Math.max(0, 48 - lv.length)).fill(0).concat(lv);
     return h_flex().id("dictate-wave").h(20).gap(3).items_center().flex_none()
-      .children(pad.map((v, i) => div().w(3).rounded(2).bg(v > 0.04 ? t.foreground : t.dim).h(Math.max(3, Math.round(3 + v * 15)))
-        .opacity(v > 0.04 ? 0.55 + v * 0.45 : 0.6)));
+      .children(pad.map((v, i) => div().w(3).rounded(2).bg(v > 0.3 ? t.foreground : t.dim).h(Math.max(3, Math.round(3 + v * 15)))
+        .opacity(v > 0.3 ? 0.55 + v * 0.45 : 0.6)));
   }
 
   // `pending`: a dropped file the host is still copying (main.js attachImage); it gets the thumbnail's box.
