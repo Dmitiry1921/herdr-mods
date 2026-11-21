@@ -19,14 +19,18 @@ export const LINE_H = 19;
 // TextView сам открывает только http(s), а ссылка на /tmp/схема.png молча не делала ничего. http(s) — через Yggdrasil
 // (ссылки Loop в открытом Loop), иначе браузером.
 // base: папка чата. Агент часто даёт ссылку путём от неё (models/x.solidcraft): такой путь достраивается от base.
+// ygg: временный журнал кликов по ссылкам (data/chat/link.log), убрать после починки.
+const linkLog = (...a) => exec("sh", ["-c", 'mkdir -p "$1" && printf "%s\\n" "$2" >> "$1/link.log"', "_", `${appHome()}/data/chat`, `${new Date().toISOString()} ${a.map(String).join(" | ")}`]).catch(() => {});
 const openLink = (url, base) => {
+  linkLog("click", url, base);
   if (/^https?:\/\//i.test(url)) return openUrl(url);
   if (/^[a-z][\w+.-]*:/i.test(url) && !/^file:/i.test(url)) return exec("open", [url]).catch(() => {});
   let p = url.replace(/^file:\/\//i, "").replace(/#.*$/, "");
   try { p = decodeURIComponent(p); } catch {}
   if (p.startsWith("~/")) p = `${appHome().replace(/\/\.config\/herdr-app$/, "")}/${p.slice(2)}`;
   else if (!p.startsWith("/") && base) p = `${base.replace(/\/$/, "")}/${p.replace(/^\.\//, "")}`;
-  if (p.startsWith("/")) exec("open", [p]).catch(() => {});
+  if (!p.startsWith("/")) return linkLog("skip", p);
+  exec("open", [p]).then((r) => linkLog("open", p, JSON.stringify(r)), (e) => linkLog("open-fail", p, e?.message ?? e));
 };
 // Текстовый виджет отдаёт в on_link_click только адреса со схемой: ссылка путём от папки чата (models/x.solidcraft)
 // рисовалась ссылкой, но клик не приходил. Такие пути до отрисовки становятся file:// с полным путём.
@@ -36,7 +40,9 @@ const absLinks = (text, base) => text.replace(/\]\((?![a-z][\w+.-]*:|#)(<[^>]+>|
   else if (!p.startsWith("/")) { if (!base) return m; p = `${base.replace(/\/$/, "")}/${p.replace(/^\.\//, "")}`; }
   return `](file://${encodeURI(p)})`;
 });
-export const prose = (id, text, base = null) => TextView.markdown(id, absLinks(text, base)).selectable(true).on_link_click((url) => openLink(url, base));
+export const prose = (id, text, base = null) => { const md = absLinks(text, base); if (/\]\(/.test(text)) linkLogOnce(id, base, md); return TextView.markdown(id, md).selectable(true).on_link_click((url) => openLink(url, base)); };
+const seenLog = new Set();
+const linkLogOnce = (id, base, md) => { if (seenLog.has(id)) return; seenLog.add(id); linkLog("render", id, base, (md.match(/\]\([^)]*\)/g) ?? []).join(" ")); };
 
 // Markdown → the chunks drawn one TextView each, so the space between
 // paragraphs, lists, tables and headings is ours (space.js), not the
