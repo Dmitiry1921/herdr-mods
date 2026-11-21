@@ -18,14 +18,17 @@ export const LINE_H = 19;
 // ygg: ссылка в ответе агента открывается и на локальный файл (картинка, схема, отчёт): системой, как двойной клик в Finder.
 // TextView сам открывает только http(s), а ссылка на /tmp/схема.png молча не делала ничего. http(s) — через Yggdrasil
 // (ссылки Loop в открытом Loop), иначе браузером.
-const openLink = (url) => {
+// base: папка чата. Агент часто даёт ссылку путём от неё (models/x.solidcraft): такой путь достраивается от base.
+const openLink = (url, base) => {
   if (/^https?:\/\//i.test(url)) return openUrl(url);
-  let p = url.replace(/^file:\/\//i, "");
+  if (/^[a-z][\w+.-]*:/i.test(url) && !/^file:/i.test(url)) return exec("open", [url]).catch(() => {});
+  let p = url.replace(/^file:\/\//i, "").replace(/#.*$/, "");
   try { p = decodeURIComponent(p); } catch {}
   if (p.startsWith("~/")) p = `${appHome().replace(/\/\.config\/herdr-app$/, "")}/${p.slice(2)}`;
+  else if (!p.startsWith("/") && base) p = `${base.replace(/\/$/, "")}/${p.replace(/^\.\//, "")}`;
   if (p.startsWith("/")) exec("open", [p]).catch(() => {});
 };
-export const prose = (id, text) => TextView.markdown(id, text).selectable(true).on_link_click((url) => openLink(url));
+export const prose = (id, text, base = null) => TextView.markdown(id, text).selectable(true).on_link_click((url) => openLink(url, base));
 
 // Markdown → the chunks drawn one TextView each, so the space between
 // paragraphs, lists, tables and headings is ours (space.js), not the
@@ -68,10 +71,10 @@ export function mdChunks(text) {
 const above = (heading, prev) => (prev == null ? 0 : heading ? SPACE.headingAbove : prev.heading ? SPACE.headingBelow : SPACE.block);
 
 // Markdown as its chunks, spaced (one TextView when it's one chunk).
-export function markdown(id, text) {
+export function markdown(id, text, base = null) {
   const parts = mdChunks(text || " ");
-  if (parts.length === 1) return prose(id, parts[0].text);
-  return v_flex().min_w(0).children(parts.map((p, j) => div().pt(above(p.heading, parts[j - 1])).child(prose(`${id}-${j}`, p.text))));
+  if (parts.length === 1) return prose(id, parts[0].text, base);
+  return v_flex().min_w(0).children(parts.map((p, j) => div().pt(above(p.heading, parts[j - 1])).child(prose(`${id}-${j}`, p.text, base))));
 }
 
 // Whether a block starts or ends with a heading (for the space around it).
@@ -93,7 +96,7 @@ export function blocks(it, c) {
     let el;
     if (b.type === "code") el = (!b.open && c.codeView?.(key)) || codeCard(key, b.lang, b.code ?? "", b.lines, b.open, c);
     else if (b.type === "mermaid") el = mermaid(key, b, c);
-    else el = c.codeView?.(key) || markdown(`md-${it.id}-${i}`, b.text);
+    else el = c.codeView?.(key) || markdown(`md-${it.id}-${i}`, b.text, c.cwd);
     // ygg: картинка, на которую агент сослался (![…](/путь.png) или [Открыть схему](/путь.png)), видна в ответе, как в Codex.
     const pics = b.type === "markdown" ? [...new Set([...(b.text ?? "").matchAll(/\]\((?:file:\/\/)?(\/[^)\s]+\.(?:png|jpe?g|gif|webp))\)/gi)].map((m) => m[1]))] : [];
     const shown = pics.map((p) => c.media?.(p)).filter(Boolean);

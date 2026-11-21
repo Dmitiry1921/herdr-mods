@@ -166,11 +166,11 @@ function user(it, c) {
   if (it.images && !it.imagePaths?.length) tags.push(h_flex().gap(4).items_center().child(icon("image", 11)).child(plural(it.images, "image")));
   // The actions sit left of the bubble, on its last line: no extra height.
   const b = SPACE.bubble;
-  const body = (key) => div().text_size(14).line_height(`${SPACE.lineH}px`).child(prose(`md-${it.id}${key}`, text || " "));
+  const body = (key) => div().text_size(14).line_height(`${SPACE.lineH}px`).child(prose(`md-${it.id}${key}`, text || " ", c.cwd));
   const skill = it.skill;
   // What the agent got for the skill, under its pill once opened.
   const skillBody = Boolean(skill?.body) && c.expanded.has(`skill:${it.id}`)
-    ? [div().pl(12).border_l_1().border_color(t.border).text_size(12.5).line_height("19px").text_color(t.muted).child(prose(`skill-${it.id}`, skill.body))]
+    ? [div().pl(12).border_l_1().border_color(t.border).text_size(12.5).line_height("19px").text_color(t.muted).child(prose(`skill-${it.id}`, skill.body, c.cwd))]
     : [];
   // A skill: its pill, then the message: beside it when that is one short line,
   // else under it (as the bubble's own rows: a nested column sizes the text too narrow).
@@ -228,7 +228,7 @@ function report(it, from, text, c) {
         .when(long, (e) => e.child(h_flex().flex_none().gap(4).items_center().text_size(11.5).text_color(t.dim)
           .child(open ? "Fold" : plural(lines.length, "line")).child(icon(open ? "chevron-up" : "chevron-down", 11)))))
       .child(div().border_t_1().border_color(c.line).px(12).py(8).text_size(13.5).line_height("20px")
-        .child(prose(`rp-${it.id}-${open ? 1 : 0}`, shown || " ")))
+        .child(prose(`rp-${it.id}-${open ? 1 : 0}`, shown || " ", c.cwd)))
       .when(long && !open, (e) => e.child(div().id(`report-more-${it.id}`).px(12).pb(8).text_size(11.5).text_color(t.accent).cursor_pointer()
         .on_click((_e, cx) => c.toggle(`report:${it.id}`, cx)).child("Show all"))));
 }
@@ -265,7 +265,7 @@ export function thinking(it, c) {
         : div().flex_none().child(label))
       .when(secs != null, (e) => e.child(div().flex_none().text_color(t.dim).child(`${secs}s`))))
     .when(open, (e) => e.child(div().ml(9).mt(2).mb(6).pl(14).border_l_1().border_color(t.border).text_size(13).line_height("20px")
-      .text_color(t.dim).italic().child(prose(`th-${it.id}`, it.text || " "))));
+      .text_color(t.dim).italic().child(prose(`th-${it.id}`, it.text || " ", c.cwd))));
 }
 
 const TOOL_ICON = { bash: "terminal", read: "file-text", edit: "pencil", write: "file-plus", search: "search", web: "globe", agent: "bot", generic: "wrench" };
