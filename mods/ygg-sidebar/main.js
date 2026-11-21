@@ -111,6 +111,7 @@ const move = (order, from, to) => { const o = order.filter((x) => x !== from); o
 const find = (n, id) => { if (!n || typeof n !== "object") return null; if (n.id === id) return n; for (const c of n.children ?? []) { const r = find(c, id); if (r) return r; } return null; };
 // Свёрнутая панель у Herdr — это узкая ширина (как в workspace-chrome), не флаг.
 const narrow = () => (find(layout(), "sidebar")?.size?.px ?? Infinity) < 160;
+const RAIL = 52;
 const unfold = () => { setShared("sidebar.collapsed", false); run("layout.resize", { id: "sidebar", px: shared("sidebar.width") ?? 268 }); };
 
 export default class YggSidebar extends View {
@@ -822,7 +823,7 @@ export default class YggSidebar extends View {
     if (this.popKey === key && this.popId && !again) return;
     if (this.popId) closeOverlay(shared("ygg.popId") ?? this.popId);
     this.popKey = key;
-    const at = { x: (find(layout(), "sidebar")?.size?.px ?? 76) + 4, y: Math.max(8, (this.at?.y ?? 80) - 22) };
+    const at = { x: (find(layout(), "sidebar")?.size?.px ?? RAIL) + 4, y: Math.max(8, (this.at?.y ?? 80) - 22) };
     const h = Math.min(POP_MAX, 52 + Math.max(1, n) * ROW);
     this.popId = openOverlay({ mod: "ygg-sidebar", kind: "popup", width: 320, height: h, at, props: { popup: key, at, h } });
     setShared("ygg.popId", this.popId);
@@ -841,6 +842,9 @@ export default class YggSidebar extends View {
   // Свёрнутая панель: кнопка «развернуть», затем значки проектов по группам с точкой статуса.
   // Клик по проекту — его самая важная сессия (ждёт, работает, готово, иначе первая).
   rail(sections, tabTerms, ps, kids, t) {
+    // Встроенный workspace-chrome сворачивает в 76 под светофор macOS; рельсу хватает 52 (ячейка 36 + поля),
+    // светофор ygg-tabs обходит отступом слева.
+    if ((find(layout(), "sidebar")?.size?.px ?? RAIL) > RAIL) run("layout.resize", { id: "sidebar", px: RAIL });
     const cell = (id) => div().id(id).size(36).flex_none().flex().items_center().justify_center().rounded(8).relative().cursor_pointer().hover((st) => st.bg(t.hover));
     const icons = sections.flatMap(({ g, list }, gi) => [
       ...(gi ? [div().w(24).h(1).my(6).flex_none().bg(LINE)] : []),
