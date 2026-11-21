@@ -68,11 +68,11 @@ function images(paths, sizes, owner, c) {
     const size = sizes?.[i] ?? null;
     const k = size && Math.min(1, maxW / size.w, 320 / size.h);
     const [w, h] = (size ? [size.w * k, size.h * k] : [maxW, (maxW * 10) / 16]).map((v) => Math.max(1, Math.round(v)));
-    // ygg: без рамки, углы как у пузыря сообщения — так же, как картинки в ответе агента (rich.js)
+    // ygg: без рамки, углы скруглены на самой картинке — так же, как картинки в ответе агента (rich.js)
     const rel = homeRel(path, appHome());
     if (rel) c.traceThumb?.(path, w, h);
-    return (rel ? h_flex().id(`img-${owner}-${i}`).flex_none().rounded(SPACE.bubble.r).overflow_hidden().cursor_pointer()
-      .on_click((_e, cx) => c.enlarge(path, size, cx)).child(image(rel).w(w).h(h)) : null)
+    return (rel ? h_flex().id(`img-${owner}-${i}`).flex_none().rounded(12).cursor_pointer()
+      .on_click((_e, cx) => c.enlarge(path, size, cx)).child(image(rel).rounded(12).w(w).h(h)) : null)
       ?? fileChip(`img-${owner}-${i}`, path.split("/").pop(), c.t).cursor_pointer().on_click((_e, cx) => c.enlarge(path, size, cx));
   }));
 }

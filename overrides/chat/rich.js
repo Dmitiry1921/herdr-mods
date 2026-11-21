@@ -102,10 +102,10 @@ export function blocks(it, c) {
       el = v_flex().gap(10).child(el).children(shown.map((m, j) => {
         const k = Math.min(1, maxW / m.size.w, 420 / m.size.h);
         // без рамки и фона, по размеру самой картинки (self_start: колонка не растягивает её на всю ширину),
-        // углы — как у пузыря сообщения
+        // углы скруглены на самой картинке (обрезка родителем в GPUI прямоугольная)
         const rel = homeRel(m.path, appHome());
-        return rel ? h_flex().id(`pic-${it.id}-${i}-${j}`).self_start().flex_none().rounded(SPACE.bubble.r).overflow_hidden().cursor_pointer()
-          .on_click((_e, cx) => c.enlarge(m.path, m.size, cx)).child(image(rel).w(Math.round(m.size.w * k)).h(Math.round(m.size.h * k))) : null;
+        return rel ? h_flex().id(`pic-${it.id}-${i}-${j}`).self_start().flex_none().rounded(12).cursor_pointer()
+          .on_click((_e, cx) => c.enlarge(m.path, m.size, cx)).child(image(rel).rounded(12).w(Math.round(m.size.w * k)).h(Math.round(m.size.h * k))) : null;
       }).filter(Boolean));
     }
     return div().pt(gap).child(el);
