@@ -78,7 +78,7 @@ const LINE = "#3d3d40";
 const ROW = 28;
 const STUB = 14; // середина строки: туда приходит ветка
 // Семантика Yggdrasil: работает синий, ждёт тебя жёлтый, готово зелёный, простой серый.
-const C = { working: "#579dff", blocked: "#f5cd47", done: "#2abb7f", idle: "#9fadbc" };
+const C = { working: "#579dff", blocked: "#e5b45b", done: "#2abb7f", idle: "#9fadbc" };
 // Машина: доступна зелёный, отвалилась красный, подключается серый.
 const M = { ready: ["#2abb7f", "доступен"], unavailable: ["#f87168", "недоступен"], loading: ["#9fadbc", "подключается"] };
 const RANK = { blocked: 4, done: 3, working: 2, idle: 1 };
@@ -630,10 +630,10 @@ export default class YggSidebar extends View {
   // Колонка статуса у правого края: одной ширины у проектов и сессий, чтобы значки стояли в линию.
   slot(el) { return div().w(14).flex_none().flex().items_center().justify_center().when(Boolean(el), (d) => d.child(el)); }
 
-  // Кнопки строки появляются поверх правого края только при наведении, места в строке не занимают.
+  // Кнопки строки появляются при наведении левее значка статуса: он остаётся виден, и на нём подсказка, что он значит.
   actions(buttons, bg) {
-    // Подсветка строки полупрозрачная: под ней сплошной фон панели, иначе сквозь кнопки видны значки статуса.
-    return div().absolute().right(0).top(0).bottom(0).rounded(6).bg(theme().chrome)
+    // Подсветка строки полупрозрачная: под кнопками сплошной фон панели, иначе сквозь них видно название.
+    return div().absolute().right(24).top(0).bottom(0).rounded(6).bg(theme().chrome)
       .child(h_flex().h_full().pl(6).pr(4).gap(2).items_center().rounded(6).bg(bg).children(buttons));
   }
 
@@ -644,7 +644,8 @@ export default class YggSidebar extends View {
 
   mark(info, remote, t) {
     if (info.status === "working") return svg("mods/workspace-chrome/spinner.svg").size(12).flex_none().text_color(C.working).spin(900);
-    if (info.status === "blocked") return div().size(14).flex_none().rounded(4).bg(C.blocked).text_size(10).font_bold().text_color("#1d2125").flex().items_center().justify_center().child("!");
+    // Ждёт тебя — жёлтая точка, как в Yggdrasil и Claude (не плашка с «!»).
+    if (info.status === "blocked") return div().size(8).mx(3).flex_none().rounded(4).bg(C.blocked);
     if (info.status === "done") return div().size(7).mx(3).flex_none().rounded(4).bg(C.done);
     if (info.status === "idle") return div().size(7).mx(3).flex_none().rounded(4).border(1.5).border_color(C.idle);
     if (info.parked || remote) return svg(`${ICONS}/moon.svg`).size(11).flex_none().text_color(t.dim);
@@ -686,7 +687,7 @@ export default class YggSidebar extends View {
       .child(this.withGlobe(div().flex_none().when(sleeping, (el) => el.opacity(0.55)).child(this.agentIcon(info.kind, t)), remote ? s.machine : null, t))
       .child(div().flex_1().min_w(0).truncate().text_color(sleeping ? t.dim : t.foreground).child(label(this.tabName(tab, info), info.kind)))
       .when(flat, (el) => el.child(div().flex_none().max_w(90).truncate().text_size(11).text_color(t.dim).child((this.cfg.projects?.[s.name]?.alias) ?? s.name)))
-      .child(this.slot(this.mark(info, remote, t)))
+      .child(div().id(`st-${flat ? "pin" : "ses"}-${tab.id}`).flex_none().tooltip(tip).child(this.slot(this.mark(info, remote, t))))
       .when(this.hovered === pkey, (el) => el.child(this.actions([this.pinButton(pkey, t, true)], tab.active && s.active ? t.selected : t.hover)));
     if (flat) return row;
     const subs = info.subs.map((k, i) => v_flex().relative()
