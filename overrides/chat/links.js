@@ -19,7 +19,7 @@ export function sessionIdOf(file) {
   return base.match(UUID)?.at(-1) ?? null;
 }
 
-const open = (url) => { script("open", url).catch(() => {}); };
+export const openUrl = (url) => { script("open", url).catch(() => {}); };
 
 // Jira: статус заглавными, цвет по категории (серый не начата, синий в работе, зелёный готова)
 function lozenge(task, t) {
@@ -98,7 +98,7 @@ export class Links {
     const now = Date.now();
     const dot = () => div().flex_none().text_color(t.dim).child("·");
     const link = (id, url, label, color = TONE.link) => div().id(id).flex_none().text_color(color).cursor_pointer().hover((s) => s.underline())
-      .on_click((_e, _cx) => open(url)).child(label);
+      .on_click((_e, _cx) => openUrl(url)).child(label);
     const img = (path, size = 14) => (path ? image(path).size(size).flex_none().rounded(size >= 16 ? size / 2 : 0) : null);
     const mark = (name, color, tip, size = 13) => {
       const el = (name.endsWith(".png") ? image(`mods/${MOD}/icons/${name}`) : name.includes("/") ? svg(name) : svg(`mods/${MOD}/icons/${name}.svg`)).size(size).flex_none();
