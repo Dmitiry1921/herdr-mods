@@ -8,7 +8,7 @@ import { div, image } from "gpui-kit";
 import { appHome, exec } from "herdr";
 import { openUrl } from "./links.js";
 import { v_flex, h_flex, TextView } from "gpui-base";
-import { alpha, codeLine, homeRel, icon, plural, spinner, thumbnail } from "./util.js";
+import { alpha, codeLine, homeRel, icon, plural, spinner } from "./util.js";
 import { SPACE } from "./space.js";
 
 export const CODE_CAP = 30; // lines shown before "Show all N lines"
@@ -101,7 +101,11 @@ export function blocks(it, c) {
       const maxW = Math.min(560, c.colW ?? 560);
       el = v_flex().gap(10).child(el).children(shown.map((m, j) => {
         const k = Math.min(1, maxW / m.size.w, 420 / m.size.h);
-        return thumbnail(`pic-${it.id}-${i}-${j}`, m, Math.round(m.size.w * k), Math.round(m.size.h * k), c);
+        // без рамки и фона, по размеру самой картинки (self_start: колонка не растягивает её на всю ширину),
+        // углы — как у пузыря сообщения
+        const rel = homeRel(m.path, appHome());
+        return rel ? h_flex().id(`pic-${it.id}-${i}-${j}`).self_start().flex_none().rounded(SPACE.bubble.r).overflow_hidden().cursor_pointer()
+          .on_click((_e, cx) => c.enlarge(m.path, m.size, cx)).child(image(rel).w(Math.round(m.size.w * k)).h(Math.round(m.size.h * k))) : null;
       }).filter(Boolean));
     }
     return div().pt(gap).child(el);
