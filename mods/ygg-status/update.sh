@@ -17,7 +17,7 @@ case "$1" in
     if [ "$have" = "$latest" ]; then echo "{\"behind\":0,\"latest\":\"$latest\"}"; exit 0; fi
     range="origin/main"; [ -n "$have" ] && git -C "$REPO" cat-file -e "$have" 2>/dev/null && range="$have..origin/main"
     n=$(git -C "$REPO" rev-list --count $range)
-    log=$(git -C "$REPO" log --format=%s -n 8 $range | cut -c1-140 | node -e 'process.stdout.write(JSON.stringify(require("fs").readFileSync(0,"utf8").split("\n").filter(Boolean)))' 2>/dev/null || echo '[]')
+    log=$(git -C "$REPO" log --format=%s -n 8 $range | cut -c1-140 | sed 's/\\/\\\\/g; s/"/\\"/g; s/.*/"&"/' | paste -sd, - | sed 's/^/[/; s/$/]/')
     echo "{\"behind\":$n,\"latest\":\"$latest\",\"log\":$log}"
     ;;
   apply)
