@@ -2226,14 +2226,17 @@ export default class HerdrChat extends View {
       .on_size_change((sz, cx) => { if (Math.abs(sz.width - this.width) > 0.5) { this.width = sz.width; this.sized(sz.width); cx.notify(); } })
       .on_drop((e, cx) => this.drop(e.paths ?? [], cx))
       .children(this.sub ? [this.subBar(t)] : [])
-      .children(banner ? [div().flex_none().pt(10).child(this.column(div().child(banner)))] : []);
+      // ygg: в пустом чате плашка в колонке над приветствием, у верхнего края её закрывал заголовок панели.
+      .children(banner && !empty ? [div().flex_none().pt(10).child(this.column(div().child(banner)))] : []);
     for (const a of Object.keys(SHORTCUTS)) root = root.on_action(actionName(a), (_e, cx) => this.shortcut(a, cx));
 
     if (empty) {
       // Startup notices (an extension's warning) don't end the empty state: they show under it.
-      const notes = rows.filter((r) => r.kind === "item" && r.item.kind === "notice").slice(-3);
+      // ygg: уведомление хоста о том же конфликте сессии плашка уже показывает, второй раз под полем не нужно.
+      const notes = rows.filter((r) => r.kind === "item" && r.item.kind === "notice"
+        && !(s.phase === "conflict" && /session is open in/i.test(r.item.text ?? ""))).slice(-3);
       return this.hud(root.child(v_flex().flex_1().min_h(0).justify_center().pb(40)
-        .child(this.column(v_flex().gap(18).child(emptyState(this, t)).child(bottom)
+        .child(this.column(v_flex().gap(18).children(banner ? [banner] : []).child(emptyState(this, t)).child(bottom)
           .when(notes.length > 0, (e) => e.child(v_flex().gap(2).children(notes.map((r) => row(r, c)))))))));
     }
     const timeline = this.timeline.view(rows, (r) => this.column(row(r, c)), {
