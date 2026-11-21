@@ -109,8 +109,6 @@ const move = (order, from, to) => { const o = order.filter((x) => x !== from); o
 
 const find = (n, id) => { if (!n || typeof n !== "object") return null; if (n.id === id) return n; for (const c of n.children ?? []) { const r = find(c, id); if (r) return r; } return null; };
 // Свёрнутая панель у Herdr — это узкая ширина (как в workspace-chrome), не флаг.
-// ponytail: временный журнал всплывашки свёрнутой панели (data/ygg-sidebar/pop.log), убрать после разбора.
-const plog = (m) => { try { exec("sh", ["-c", 'mkdir -p "$(dirname "$1")"; printf "%s %s\\n" "$(date +%T)" "$0" >> "$1"', m, `${appHome()}/data/ygg-sidebar/pop.log`]).catch(() => {}); } catch {} };
 const narrow = () => (find(layout(), "sidebar")?.size?.px ?? Infinity) < 160;
 const unfold = () => { setShared("sidebar.collapsed", false); run("layout.resize", { id: "sidebar", px: shared("sidebar.width") ?? 268 }); };
 
@@ -326,7 +324,7 @@ export default class YggSidebar extends View {
   // Пространства проекта: убранные Herdr заводим заново (в той же папке и на той же машине).
   async ensure(ss) {
     for (const x of ss.filter((y) => y.absent)) run("space.new", { name: x.name, folder: x.folder, machine: x.machine ?? "", focus: false });
-    for (let i = 0; i < 20 && ss.some((x) => x.absent && !spaces().some((y) => y.name === x.name)); i++) await new Promise((r) => setTimeout(r, 150));
+    for (let i = 0; i < 20 && ss.some((x) => x.absent && !spaces().some((y) => y.name === x.name)); i++) await exec("sleep", ["0.15"]).catch(() => {});
     return ss.map((x) => (x.absent ? spaces().find((y) => y.name === x.name)?.id : x.id)).filter(Boolean);
   }
 
@@ -818,24 +816,23 @@ export default class YggSidebar extends View {
   // Всплывашка свёрнутой панели (как в Codex): наведение на значок открывает проект с его сессиями.
   // Закрывается, когда указатель ушёл и со значка, и со всплывашки.
   pop(key, n, again = false) {
-    plog(`pop ${key} n=${n} again=${again} popKey=${this.popKey} popId=${this.popId}`);
-    clearTimeout(this.popTimer);
-    if (this.popKey === key && !again) return;
+    // В модах Herdr нет setTimeout: отложенное закрытие отменяется поколением (popGen), а не clearTimeout.
+    this.popGen = (this.popGen ?? 0) + 1;
+    if (this.popKey === key && this.popId && !again) return;
     if (this.popId) closeOverlay(this.popId);
     this.popKey = key;
     const y = Math.max(8, (this.at?.y ?? 80) - 22);
     this.popId = openOverlay({ mod: "ygg-sidebar", kind: "popup", width: 320, height: Math.min(560, 52 + Math.max(1, n) * ROW),
       at: { x: (find(layout(), "sidebar")?.size?.px ?? 76) + 4, y }, props: { popup: key } });
-    plog(`opened ${this.popId} at y=${y} sidebar=${find(layout(), "sidebar")?.size?.px}`);
   }
 
-  unpop() {
-    clearTimeout(this.popTimer);
-    this.popTimer = setTimeout(() => {
-      if (shared("ygg.popHover") || !this.popId) return;
-      plog(`unpop close ${this.popId}`);
+  unpop(cx) {
+    const gen = this.popGen = (this.popGen ?? 0) + 1;
+    cx.spawn(async (cx) => {
+      await cx.sleep(350);
+      if (gen !== this.popGen || shared("ygg.popHover") || !this.popId) return;
       closeOverlay(this.popId); this.popId = null; this.popKey = null;
-    }, 350);
+    });
   }
 
   // Свёрнутая панель: кнопка «развернуть», затем значки проектов по группам с точкой статуса.
@@ -852,8 +849,8 @@ export default class YggSidebar extends View {
         // сессию выбирают там (пользователь, 21.11.2026: «а не просто хуй пойми какую сессию чтобы открывало»).
         return cell(`rail-${s.name}`).when(active, (el) => el.bg(t.selected))
           .on_mouse_move((e) => { this.at = e.position; })
-          .on_hover((h) => { plog(`hover ${s.name} ${h}`); h ? this.pop(s.name, items.length) : this.unpop(); })
-          .on_click(() => { plog(`click ${s.name} items=${items.length}`); items.length ? this.pop(s.name, items.length, true) : s.id && run("space.select", { id: s.id }); })
+          .on_hover((h, cx) => (h ? this.pop(s.name, items.length) : this.unpop(cx)))
+          .on_click(() => (items.length ? this.pop(s.name, items.length, true) : s.id && run("space.select", { id: s.id })))
           .child(svg(`${ICONS}/${conf.icon ?? "folder"}.svg`).size(17).text_color(active ? conf.color ?? t.foreground : t.muted))
           .when(st === "working" || st === "blocked" || st === "done", (el) => el.child(div().absolute().top(5).right(5).size(7).rounded(4).bg(C[st])));
       }),
@@ -918,9 +915,11 @@ export default class YggSidebar extends View {
     if (this.smenu) return this.sessionMenu(rows, tabTerms, ps, kids, t);
     if (this.popup) {
       const r = rows.find((x) => x.s.name === this.popup);
-      if (!this.popLogged) { this.popLogged = true; plog(`popup render ${this.popup} found=${Boolean(r)} rows=${rows.length}`); }
       return v_flex().id("ygg-pop").size_full().min_h(0).bg(t.popover ?? t.chrome).p(6).text_size(13)
-        .on_hover((h) => { setShared("ygg.popHover", h); if (!h) setTimeout(() => { if (!shared("ygg.popHover")) closeOverlay(props().overlay); }, 350); })
+        .on_hover((h, cx) => {
+          setShared("ygg.popHover", h);
+          if (!h) cx.spawn(async (cx) => { await cx.sleep(350); if (!shared("ygg.popHover")) closeOverlay(props().overlay); });
+        })
         .child(r ? thin("ygg-pop-list", v_flex().id("ygg-pop-list").w_full().child(this.project(r.s.name, r.title, r.ss, r.conf, r.group, tabTerms, ps, kids, t)), true) : div());
     }
     if (narrow()) return this.rail(sections, tabTerms, ps, kids, t);

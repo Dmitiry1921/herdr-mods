@@ -213,7 +213,7 @@ export default class YggNew extends View {
       // Проект без открытого пространства: заводим его в той же папке и на той же машине, как боковая панель.
       if (sp.absent) {
         run("space.new", { name: sp.name, folder: sp.folder, machine: sp.machine ?? "", focus: false });
-        for (let i = 0; i < 20 && !spaces().some((y) => y.name === sp.name); i++) await new Promise((r) => setTimeout(r, 150));
+        for (let i = 0; i < 20 && !spaces().some((y) => y.name === sp.name); i++) await exec("sleep", ["0.15"]).catch(() => {}); // в модах Herdr нет setTimeout
         const id = spaces().find((y) => y.name === sp.name)?.id;
         if (!id) throw new Error("Не удалось открыть пространство проекта");
         Object.assign(sp, { id, absent: false });
