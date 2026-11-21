@@ -13,6 +13,7 @@ import { randomBytes } from "crypto";
 // поэтому прокрутка своя, как в ленте чата: колесо и трекпад двигают содержимое, ползунок рисуется по тем же числам.
 // fill: true растягивается (flex_1), "full" во весь родитель, число — высота в пикселях.
 const SCROLL = new Map();
+const POP_MAX = 720; // всплывашка свёрнутой панели: полный список, длиннее — прокрутка
 const thin = (id, el, fill) => {
   const s = SCROLL.get(id) ?? SCROLL.set(id, { top: 0, view: 0, content: 0 }).get(id);
   const max = Math.max(0, s.content - s.view);
@@ -819,11 +820,12 @@ export default class YggSidebar extends View {
     // В модах Herdr нет setTimeout: отложенное закрытие отменяется поколением (popGen), а не clearTimeout.
     this.popGen = (this.popGen ?? 0) + 1;
     if (this.popKey === key && this.popId && !again) return;
-    if (this.popId) closeOverlay(this.popId);
+    if (this.popId) closeOverlay(shared("ygg.popId") ?? this.popId);
     this.popKey = key;
-    const y = Math.max(8, (this.at?.y ?? 80) - 22);
-    this.popId = openOverlay({ mod: "ygg-sidebar", kind: "popup", width: 320, height: Math.min(560, 52 + Math.max(1, n) * ROW),
-      at: { x: (find(layout(), "sidebar")?.size?.px ?? 76) + 4, y }, props: { popup: key } });
+    const at = { x: (find(layout(), "sidebar")?.size?.px ?? 76) + 4, y: Math.max(8, (this.at?.y ?? 80) - 22) };
+    const h = Math.min(POP_MAX, 52 + Math.max(1, n) * ROW);
+    this.popId = openOverlay({ mod: "ygg-sidebar", kind: "popup", width: 320, height: h, at, props: { popup: key, at, h } });
+    setShared("ygg.popId", this.popId);
   }
 
   unpop(cx) {
@@ -831,7 +833,8 @@ export default class YggSidebar extends View {
     cx.spawn(async (cx) => {
       await cx.sleep(350);
       if (gen !== this.popGen || shared("ygg.popHover") || !this.popId) return;
-      closeOverlay(this.popId); this.popId = null; this.popKey = null;
+      // Всплывашка могла переоткрыться своей высоты (render, ветка popup): закрываем ту, что открыта сейчас.
+      closeOverlay(shared("ygg.popId") ?? this.popId); this.popId = null; this.popKey = null;
     });
   }
 
@@ -917,7 +920,17 @@ export default class YggSidebar extends View {
       const r = rows.find((x) => x.s.name === this.popup);
       // Всплывашка по размеру содержимого: список внутри thin() стоит абсолютно и своей высоты не даёт, поэтому
       // высота — измеренная высота списка (первый кадр 200), не больше 548; длиннее — прокрутка.
-      const ph = Math.min(548, SCROLL.get("ygg-pop-list")?.content || 200);
+      // Окно открывается с высотой по открытым вкладкам, а в списке ещё спящие и внешние сессии. Когда список
+      // измерен, всплывашка один раз переоткрывается своей полной высоты (менять размер открытого окна Herdr не даёт).
+      const pp = props(), content = SCROLL.get("ygg-pop-list")?.content || 0;
+      const need = Math.min(POP_MAX, content + 14);
+      if (content > 0 && !this.popResized && Math.abs(need - (pp.h ?? 0)) > 4) {
+        this.popResized = true;
+        const id = openOverlay({ mod: "ygg-sidebar", kind: "popup", width: 320, height: need, at: pp.at, props: { popup: this.popup, at: pp.at, h: need } });
+        setShared("ygg.popId", id);
+        closeOverlay(pp.overlay);
+      }
+      const ph = Math.max(40, (pp.h ?? 200) - 14);
       return v_flex().id("ygg-pop").w_full().bg(t.popover ?? t.chrome).p(6).text_size(13)
         .on_hover((h, cx) => {
           setShared("ygg.popHover", h);
