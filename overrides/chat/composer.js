@@ -191,13 +191,12 @@ export class Composer {
     const pre = this.value;
     const glue = (text) => (pre && text && !/\s$/.test(pre) ? `${pre} ${text}` : `${pre}${text}`);
     let shown = "";
-    const run = (this.dictRun = { detached: false });
+    const run = (this.dictRun = { then: null });
     const show = async (cx) => {
-      if (run.detached) return; // сообщение уже ушло: текст записи в поле не возвращается
       const text = await fs.readFile(`${base}.txt`, "utf8").catch(() => "");
       const lvl = await fs.readFile(`${base}.lvl`, "utf8").catch(() => "");
       if (lvl !== this.levelsRaw) { this.levelsRaw = lvl; this.levels = lvl ? lvl.split(",").map(Number) : []; cx.notify(); }
-      if (text !== shown && !run.detached) { shown = text; this.set(glue(text)); cx.notify(); }
+      if (text !== shown) { shown = text; this.set(glue(text)); cx.notify(); }
     };
     this.dict = "rec"; this.dictErr = null;
     cx.notify();
@@ -210,16 +209,18 @@ export class Composer {
       this.dictErr = await fs.readFile(`${base}.err`, "utf8").catch(() => null);
       this.dict = null; this.levels = []; this.levelsRaw = "";
       cx.notify();
+      run.then?.(cx);
     });
   }
 
-  // Отправка во время записи: запись останавливается, а её хвост в поле уже не попадает (ушло то, что было видно).
-  endDictation() {
-    if (!this.dict || !this.dictRun) return;
-    this.dictRun.detached = true;
-    this.levels = []; this.levelsRaw = "";
+  // Отправка во время записи: запись останавливается, последний проход распознаёт хвост, и только потом `then`
+  // отправляет поле целиком. Раньше уходило то, что успело распознаться, и последние слова терялись.
+  finishDictation(then) {
+    if (!this.dict || !this.dictRun) return false;
+    this.dictRun.then = then;
     fs.writeFile(`${appHome()}/data/dictate/${this.dictId}.stop`, "1").catch(() => {});
     if (this.dict === "rec") this.dict = "busy";
+    return true;
   }
 
   // «+» как у Claude: системный выбор файлов; картинки встают превью, остальное — @путь в тексте (как при перетаскивании).
@@ -360,7 +361,7 @@ export class Composer {
     const mic = round("dictate")
       .when(rec, (e) => e.bg(alpha(t.accent, 0.22)).text_color(t.accent))
       .when(!rec, (e) => e.text_color(this.dictErr ? (t.error ?? "#f87168") : t.muted).hover((s) => s.bg(t.hover).text_color(t.foreground)))
-      .tooltip(rec ? "Идёт запись. Клик — остановить (Enter — остановить и отправить)" : busy ? "Распознаю речь" : this.dictErr ?? "Надиктовать. Клик — начать запись")
+      .tooltip(rec ? "Идёт запись. Клик — остановить (Enter — дораспознать и отправить)" : busy ? "Распознаю речь" : this.dictErr ?? "Надиктовать. Клик — начать запись")
       .on_click((_e, cx) => this.dictate(cx))
       .child(busy ? spinner(14, t.muted) : rec ? icon("square", 11) : icon("mic", 17));
     return v_flex().w_full().rounded(18).border_1().bg(t.input)

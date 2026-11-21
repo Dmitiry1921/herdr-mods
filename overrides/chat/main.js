@@ -831,6 +831,8 @@ export default class HerdrChat extends View {
   // `mode`: "auto" (Enter: steers while the agent works) or "followUp" (Alt+Enter: after this run).
   // A follow-up taken out of its lane for editing goes back to it on Enter (its lane never changes implicitly).
   send(cx, mode = "auto") {
+    // ygg: Enter во время диктовки ждёт последний проход распознавания и отправляет уже полный текст.
+    if (this.composer.finishDictation((cx) => this.send(cx, mode))) { cx.notify(); return this.flash("Дораспознаю речь и отправлю", cx); }
     if (mode === "auto" && this.editingQueued?.lane === "followUp") mode = "followUp";
     this.editingQueued = null;
     const message = this.composer.message();
@@ -854,7 +856,6 @@ export default class HerdrChat extends View {
         return;
       }
     }
-    this.composer.endDictation();
     this.composer.clear();
     this.timeline.toBottom();
     this.fire("send", { text, ...(images.length ? { images } : {}), mode }, cx, (d) => {
