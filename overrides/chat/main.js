@@ -1468,6 +1468,20 @@ export default class HerdrChat extends View {
     this.flash(`Copied ${text.length} character${text.length === 1 ? "" : "s"}`, cx);
   }
 
+  // ygg: цитата сообщения в поле ввода «> …». TextView не отдаёт выделение, поэтому кусок берётся из буфера: выделил,
+  // ⌘C, «Цитировать». Буфер, которого в сообщении нет (сравнение без разметки и пробелов), не в счёт: тогда всё сообщение.
+  quote(text, cx) {
+    const flat = (x) => x.replace(/[*_`#>|]/g, "").replace(/\s+/g, " ").trim();
+    const clip = (cx.read_from_clipboard?.() ?? "").trim();
+    let frag = clip && flat(clip).length > 1 && flat(text).includes(flat(clip)) ? clip : text.trim();
+    if (frag.length > 1200) frag = `${frag.slice(0, 1200).replace(/\s+\S*$/, "")} …`;
+    const q = frag.split("\n").map((l) => (l.trim() ? `> ${l}` : ">")).join("\n");
+    const now = this.composer.value.replace(/\s+$/, "");
+    this.composer.set(`${now ? `${now}\n\n` : ""}${q}\n\n`);
+    this.composer.focus();
+    cx.notify();
+  }
+
   copy(id, text, cx) {
     cx.write_to_clipboard(text ?? "");
     this.copied = (text ?? "").length;
@@ -2134,7 +2148,7 @@ export default class HerdrChat extends View {
       codeBg: t.background, line: alpha(t.border, 0.7), hover: this.hover, activity: this.activity(),
       codeView: (key) => this.codeViews.get(key)?.entity ?? null,
       toggle: (id, cx) => this.toggle(id, cx), more: (id, cx) => this.more(id, cx),
-      copy: (id, text, cx) => this.copy(id, text, cx), copied: (id) => this.copiedAt.has(id),
+      copy: (id, text, cx) => this.copy(id, text, cx), copied: (id) => this.copiedAt.has(id), quote: (text, cx) => this.quote(text, cx),
       enlarge: (p, size, cx) => this.enlarge(p, size, cx), svgSize: (p) => this.svgSize(p), traceThumb: (p, w, h) => this.thumbsSeen?.add(p, w, h),
       openFile: (p, line, cx) => this.openFile(p, line, cx), editResend: (it, cx) => this.editResend(it, cx),
       setHover: (id, on, cx) => this.setHover(id, on, cx), svgHover: this.svgHover ?? null,

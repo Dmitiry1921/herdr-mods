@@ -82,6 +82,8 @@ function actions(it, footer, c, { align = "start", text } = {}) {
   const acts = it ? h_flex().gap(2).items_center().opacity(on ? 1 : 0).transition("opacity", { duration: 120, easing: "ease-out" })
     .child(div().id(`ts-${it.id}`).px(4).text_size(11).text_color(t.dim).tooltip(absTime(it.ts)).child(relTime(it.ts, c.now)))
     .when(on, (e) => e.child(copyButton(`msg:${it.id}`, text ?? it.text ?? "", c, { size: 12.5 }))
+      // ygg: цитата в поле ввода; выделенный и скопированный (⌘C) кусок этого сообщения — он, иначе сообщение целиком.
+      .child(btn(`quote-${it.id}`, "text-quote", "Цитировать. Клик — в поле ввода (скопированный кусок сообщения или всё)", (_e, cx) => c.quote(text ?? it.text ?? "", cx)))
       .when(it.kind === "user", (x) => x.child(btn(`edit-${it.id}`, "pencil", "Edit and resend", (_e, cx) => c.editResend(it, cx)))))
     : null;
   let foot = null;
