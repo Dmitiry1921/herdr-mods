@@ -39,6 +39,7 @@ const KNOWN = () => `${appHome()}/data/ygg-sidebar/known.json`;
 // Архив сессий: ушедшие из панели, их можно вернуть из меню проекта.
 const ARCHIVE = () => `${appHome()}/data/ygg-sidebar/archive.json`;
 const OPS = () => `${appHome()}/mods/ygg-sidebar/session-ops.mjs`;
+const SPLIT = () => `${appHome()}/mods/ygg-sidebar/split.mjs`;
 const EXTERNAL = () => `${appHome()}/mods/ygg-sidebar/external.mjs`;
 // Папка сессии относится к проекту: сама папка, внутри неё, её worktree (<папка>-worktrees/…)
 // и worktree приложения Codex (~/.codex/worktrees/<id>/<имя папки>).
@@ -412,7 +413,7 @@ export default class YggSidebar extends View {
   }
 
   // Открыть сессию чатом во вкладке пространства (путь к файлу: у Claude по голому id заводится новая).
-  // split: {direction, pane?} — чат рядом с открытым в панели, а не новой вкладкой.
+  // split: {direction: right|left|down|up|grid} — чат рядом с открытым в панели, а не новой вкладкой (split.mjs).
   async openChat(spaceId, name, kind, cwd, session, machine = null, split = null) {
     // На сервере файл сессии не ищем: хост продолжает тред Codex по id в демоне машины.
     // DeepSeek (ACP) продолжает сессию по id, файла не ищем.
@@ -420,7 +421,10 @@ export default class YggSidebar extends View {
     const remote = machine ? await sshTarget(machine) : null;
     const chat = `c-${randomBytes(4).toString("hex")}`;
     const p = { chat, provider: kind, cwd, session: found ?? session, ...(remote ? { remote } : {}) };
-    if (split) run("pane.split", { ...split, mod: "chat", props: p });
+    if (split) {
+      const r = await exec("sh", ["-c", RUN, SPLIT(), split.direction, JSON.stringify(p)], { timeout: 20000 }).then((x) => JSON.parse(x.stdout || "{}")).catch((e) => ({ ok: false, error: String(e) }));
+      if (!r.ok) throw new Error(r.error ?? "не открылось рядом");
+    }
     else run("tab.new", { space: spaceId, name, mod: "chat", props: p });
     return chat;
   }
@@ -467,6 +471,26 @@ export default class YggSidebar extends View {
     }
     // Сначала дело, потом закрыть меню: меню — отдельное окно, с ним пропадает и незаконченная работа пункта.
     const done = (fn) => async (cx) => { try { await fn(cx); } finally { close(); } };
+    if (this.view === "split") {
+      const can = local && agent && !(tab.active && s.active);
+      const side = (dir, icon, text, tip) => item(`split-${dir}`, icon, text, `${tip}. Клик — открыть`, done(async () => {
+        const id = await this.sessionOf(info);
+        if (!id) return;
+        await this.openChat(s.id, tab.name, info.kind, cwd, id, null, { direction: dir });
+        run("tab.close", { id: tab.id, confirmed: true });
+      }), can);
+      return root
+        .child(item("back", "chevron-left", "Разделить окно", "Клик — назад к меню сессии", (cx) => { this.view = null; cx.notify(); }))
+        .child(line())
+        .child(side("right", "panel-right", "Справа", "Панель справа от чата в фокусе"))
+        .child(side("left", "panel-left", "Слева", "Панель слева от чата в фокусе"))
+        .child(side("down", "panel-bottom", "Снизу", "Панель под чатом в фокусе"))
+        .child(side("up", "panel-top", "Сверху", "Панель над чатом в фокусе"))
+        .child(side("grid", "layout-grid", "В сетку", "Делится самая большая панель вкладки: 4 окна встают 2×2, 6 окон 3×2"))
+        .child(line())
+        .child(item("split-even", "columns-3", "Выровнять панели", "Все панели вкладки в фокусе равной ширины и высоты. Клик — выровнять",
+          done(() => exec("sh", ["-c", RUN, SPLIT(), "even"], { timeout: 20000 }))));
+    }
     return root
       .child(item("rename", "pencil", "Переименовать", "Имя сессии в панели. Клик — переименовать", done(() => run("tab.rename", { id: tab.id }))))
       .child(item("pin", "pin", pinned ? "Открепить" : "Закрепить", pinned ? "Сессия наверху панели. Клик — открепить" : "Клик — закрепить наверху панели",
@@ -477,14 +501,9 @@ export default class YggSidebar extends View {
         const r = id && await ops("fork", info.kind, id, cwd);
         if (r?.ok) this.openChat(s.id, `${tab.name ?? "Сессия"} · форк`, info.kind, cwd, r.path);
       }), local && agent))
-      // Рядом с открытым чатом: сессия переезжает из своей вкладки в панель справа или снизу (два чата на одну сессию нельзя).
-      .children(["right", "down"].map((dir) => item(`split-${dir}`, dir === "right" ? "split" : "split-down", dir === "right" ? "Открыть справа" : "Открыть снизу",
-        `Сессия рядом с открытым чатом, в той же вкладке. Клик — открыть ${dir === "right" ? "справа" : "снизу"}`, done(async () => {
-          const id = await this.sessionOf(info);
-          if (!id) return;
-          await this.openChat(s.id, tab.name, info.kind, cwd, id, null, { direction: dir });
-          if (!(tab.active && s.active)) run("tab.close", { id: tab.id, confirmed: true });
-        }), local && agent && !(tab.active && s.active))))
+      // Рядом с открытым чатом: сессия переезжает из своей вкладки в панель рядом (два чата на одну сессию нельзя).
+      .child(item("split", "columns-3", "Разделить окно", "Сессия рядом с открытым чатом, в той же вкладке. Клик — выбрать сторону",
+        (cx) => { this.view = "split"; cx.notify(); }, true, svg(`${ICONS}/chevron-right.svg`).size(12).text_color(t.dim)))
       .child(item("move", "folder-input", "Перенести в проект", "Сессия продолжится в другом проекте. Клик — выбрать проект",
         (cx) => { this.view = "move"; cx.notify(); }, local && agent, svg(`${ICONS}/chevron-right.svg`).size(12).text_color(t.dim)))
       .child(line())
@@ -683,7 +702,7 @@ export default class YggSidebar extends View {
     const row = this.draggable(h_flex().id(`${flat ? "pin" : "ses"}-${tab.id}`).relative().h(ROW).px(6).gap(8).items_center().rounded(6).cursor_pointer()
       .when(tab.active && s.active, (el) => el.bg(t.selected))
       .when(!(tab.active && s.active), (el) => el.hover((st) => st.bg(t.hover)))
-      .on_mouse_down("right", (e) => openOverlay({ mod: "ygg-sidebar", kind: "popup", width: 280, height: 291,
+      .on_mouse_down("right", (e) => openOverlay({ mod: "ygg-sidebar", kind: "popup", width: 280, height: 263,
         at: { x: e.position?.x ?? 40, y: e.position?.y ?? 80 }, props: { smenu: { tab: tab.id, space: s.id } } }))
       .on_hover((h, cx) => { this.hovered = h ? pkey : this.hovered === pkey ? null : this.hovered; cx.notify(); }), "s", tab.id, flat ? "__pins" : s.name, () => this.open(s, tab, info))
       .child(this.withGlobe(div().flex_none().when(sleeping, (el) => el.opacity(0.55)).child(this.agentIcon(info.kind, t)), remote ? s.machine : null, t))
