@@ -854,6 +854,7 @@ export default class HerdrChat extends View {
         return;
       }
     }
+    this.composer.endDictation();
     this.composer.clear();
     this.timeline.toBottom();
     this.fire("send", { text, ...(images.length ? { images } : {}), mode }, cx, (d) => {

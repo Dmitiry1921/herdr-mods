@@ -191,11 +191,13 @@ export class Composer {
     const pre = this.value;
     const glue = (text) => (pre && text && !/\s$/.test(pre) ? `${pre} ${text}` : `${pre}${text}`);
     let shown = "";
+    const run = (this.dictRun = { detached: false });
     const show = async (cx) => {
+      if (run.detached) return; // сообщение уже ушло: текст записи в поле не возвращается
       const text = await fs.readFile(`${base}.txt`, "utf8").catch(() => "");
       const lvl = await fs.readFile(`${base}.lvl`, "utf8").catch(() => "");
       if (lvl !== this.levelsRaw) { this.levelsRaw = lvl; this.levels = lvl ? lvl.split(",").map(Number) : []; cx.notify(); }
-      if (text !== shown) { shown = text; this.set(glue(text)); cx.notify(); }
+      if (text !== shown && !run.detached) { shown = text; this.set(glue(text)); cx.notify(); }
     };
     this.dict = "rec"; this.dictErr = null;
     cx.notify();
@@ -209,6 +211,15 @@ export class Composer {
       this.dict = null; this.levels = []; this.levelsRaw = "";
       cx.notify();
     });
+  }
+
+  // Отправка во время записи: запись останавливается, а её хвост в поле уже не попадает (ушло то, что было видно).
+  endDictation() {
+    if (!this.dict || !this.dictRun) return;
+    this.dictRun.detached = true;
+    this.levels = []; this.levelsRaw = "";
+    fs.writeFile(`${appHome()}/data/dictate/${this.dictId}.stop`, "1").catch(() => {});
+    if (this.dict === "rec") this.dict = "busy";
   }
 
   // «+» как у Claude: системный выбор файлов; картинки встают превью, остальное — @путь в тексте (как при перетаскивании).
@@ -349,9 +360,9 @@ export class Composer {
     const mic = round("dictate")
       .when(rec, (e) => e.bg(alpha(t.accent, 0.22)).text_color(t.accent))
       .when(!rec, (e) => e.text_color(this.dictErr ? (t.error ?? "#f87168") : t.muted).hover((s) => s.bg(t.hover).text_color(t.foreground)))
-      .tooltip(rec ? "Идёт запись. Клик — остановить и вставить текст" : busy ? "Распознаю речь" : this.dictErr ?? "Надиктовать. Клик — начать запись")
+      .tooltip(rec ? "Идёт запись. Клик — остановить (Enter — остановить и отправить)" : busy ? "Распознаю речь" : this.dictErr ?? "Надиктовать. Клик — начать запись")
       .on_click((_e, cx) => this.dictate(cx))
-      .child(busy ? spinner(14, t.muted) : icon("mic", 17));
+      .child(busy ? spinner(14, t.muted) : rec ? icon("square", 11) : icon("mic", 17));
     return v_flex().w_full().rounded(18).border_1().bg(t.input)
       .border_color(alpha(t.foreground, this.focused ? 0.16 : 0.07))
       .when(chips.length > 0, (e) => e.child(h_flex().px(14).pt(12).gap(8).flex_wrap().children(chips)))
