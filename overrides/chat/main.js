@@ -31,6 +31,7 @@ import { fps_monitor } from "gpui-fps";
 import { v_flex, h_flex, Popup } from "gpui-base";
 import { agents, appHome, closeOverlay, exec, focused, hc, home, nextCommand, notify, openOverlay, panes, props, run, settings, setShared, shared, spaces, terminals, theme, updates, window as appWindow } from "herdr";
 import { randomBytes } from "crypto";
+import * as fs from "fs/promises";
 import { modPanes, readDoc } from "./place.js";
 import { getDoc, hideHost, locate } from "./hostpane.js";
 import { SHORTCUTS, actionName, errors as keyErrors, keyHint, loadShortcuts, shortcuts, withKey } from "./shortcuts.js";
@@ -141,6 +142,7 @@ export default class HerdrChat extends View {
       onRemoveChip: (ch) => this.req("detach_image", { path: ch.path }).catch(() => {}),
       skills: () => this.commandList().filter((c) => c.source === "skill").map((c) => ({ command: c.name, name: c.name.replace(/^skill:/, "") })),
     });
+    this.loadDraft(cx);
     this.conn = new Connection({
       chat: this.chat,
       cwd: this.cwd ?? home(),
@@ -2217,7 +2219,37 @@ export default class HerdrChat extends View {
     return known ?? String(m).split("/").pop();
   }
 
+  // ygg: черновик поля ввода (текст и картинки) переживает перезагрузку мода, «Обновить» и перезапуск Herdr:
+  // пишется в data/chat-drafts/<chat>.json при каждом изменении, читается при открытии чата. Не отправляется.
+  draftFile() { return `${appHome()}/data/chat-drafts/${this.chat}.json`; }
+  loadDraft(cx) {
+    if (this.peekMode) return;
+    this.draftSaved = null; // пока черновик не прочитан, не перезаписывать его пустым полем
+    cx.spawn(async (cx) => {
+      await exec("mkdir", ["-p", `${appHome()}/data/chat-drafts`]).catch(() => {});
+      const raw = await fs.readFile(this.draftFile(), "utf8").catch(() => "");
+      try {
+        const d = raw ? JSON.parse(raw) : null;
+        if (d && !this.composer.value && !this.composer.chips.length) {
+          if (d.text) this.composer.set(d.text);
+          for (const ch of d.chips ?? []) Object.assign(this.composer.addChip(ch.path, { size: ch.size ?? null }), { label: ch.label ?? ch.path.split("/").pop() });
+        }
+      } catch {}
+      this.draftSaved = raw || "{}";
+      cx.notify();
+    });
+  }
+  saveDraft() {
+    if (this.peekMode || this.draftSaved == null) return;
+    const chips = this.composer.chips.filter((c) => !c.pending).map((c) => ({ path: c.path, size: c.size, label: c.label }));
+    const json = this.composer.value.trim() || chips.length ? JSON.stringify({ text: this.composer.value, chips }) : "{}";
+    if (json === this.draftSaved) return;
+    this.draftSaved = json;
+    fs.writeFile(this.draftFile(), json).catch(() => {});
+  }
+
   render(cx) {
+    this.saveDraft();
     if (this.viewer) return this.viewer.render(cx);
     if (this.termbar) return this.termbar.render(cx);
     // The host's hidden pane took the focus (agent.focus, the agents list, cmd-]): a
