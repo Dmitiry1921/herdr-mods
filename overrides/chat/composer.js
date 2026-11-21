@@ -14,9 +14,9 @@
 //   HerdrChatQuestions the same for a questions card, and Space ticks
 // Esc is ours in all of them.
 
-import { div } from "gpui-kit";
+import { div, image } from "gpui-kit";
 import { v_flex, h_flex, TextareaState, Textarea } from "gpui-base";
-import { alpha, fileChip, icon, spinner, thumbnail } from "./util.js";
+import { alpha, fileChip, homeRel, icon, spinner, thumbnail } from "./util.js";
 import { exec, appHome } from "herdr";
 import * as fs from "fs/promises";
 import { follow } from "./menus.js";
@@ -72,6 +72,7 @@ export const skillToken = (s) => ({ id: `skill:${s.command}`, text: `/${s.comman
 
 // An image chip's thumbnail: a fixed box, so the composer keeps its height while the image loads.
 const THUMB = { w: 64, h: 48 };
+const CARD = { w: 138, h: 92 }; // превью вложения в поле ввода (ygg)
 
 export class Composer {
   // `skills()`: the chat's skill commands, [{command, name}] (main.js).
@@ -330,13 +331,17 @@ export class Composer {
     const chips = this.chips.map((ch, i) => {
       const x = div().id(`chip-x-${i}`).cursor_pointer().rounded(4).hover((s) => s.text_color(t.foreground).bg(t.hover))
         .on_click((_e, cx) => { cx.stop_propagation(); this.removeChip(i); cx.notify(); }).child(icon("x", 11));
-      const thumb = ch.pending
-        ? h_flex().id(`chip-${i}`).flex_none().rounded(10).border_1().border_color(t.border)
-          .child(h_flex().w(THUMB.w).h(THUMB.h).items_center().justify_center().text_color(t.muted).child(icon("image", 16)))
-        : thumbnail(`chip-${i}`, ch, THUMB.w, THUMB.h, c);
-      if (thumb) {
-        return div().relative().flex_none().child(thumb.tooltip(ch.label))
-          .child(x.absolute().top(4).right(4).p(1).bg(t.raised).border_1().border_color(t.border).text_color(t.muted));
+      // ygg: карточка как в Codex: превью целиком (вписано в рамку), под ним значок и имя, × в углу.
+      const rel = ch.pending ? null : homeRel(ch.path, appHome());
+      if (ch.pending || rel) {
+        const k = ch.size ? Math.min(CARD.w / ch.size.w, CARD.h / ch.size.h) : 1;
+        const pic = rel ? image(rel).rounded(6).w(ch.size ? Math.round(ch.size.w * k) : CARD.w).h(ch.size ? Math.round(ch.size.h * k) : CARD.h) : spinner(14, t.muted);
+        return div().relative().flex_none().child(v_flex().id(`chip-${i}`).w(CARD.w + 12).rounded(12).border_1().border_color(t.border).bg(t.background)
+          .tooltip(ch.label).cursor_pointer().on_click((_e, cx) => rel && c.enlarge?.(ch.path, ch.size, cx))
+          .child(h_flex().h(CARD.h + 12).items_center().justify_center().child(pic))
+          .child(h_flex().h(28).px(8).gap(6).items_center().border_t_1().border_color(t.border)
+            .child(div().text_color(t.muted).child(icon("image", 12))).child(div().min_w(0).truncate().text_size(12).text_color(t.foreground).child(ch.label))))
+          .child(x.absolute().top(-6).right(-6).size(20).flex().items_center().justify_center().rounded_full().bg(t.foreground).text_color(t.background));
       }
       return fileChip(`chip-${i}`, ch.label, t).pr(6).bg(t.raised).child(x);
     });

@@ -925,6 +925,24 @@ export default class HerdrChat extends View {
         this.attachImage(this.composer.addChip(p, { pending: true }), cx);
         continue;
       }
+      // ygg: фото с iPhone (HEIC) и прочие картинки, которые модель не берёт: сначала JPEG через sips, потом как обычная картинка.
+      if (/\.(heic|heif|tiff?|bmp)$/i.test(p)) {
+        const chip = this.composer.addChip(p, { pending: true });
+        const dst = `${appHome()}/data/chat-media/convert/${p.split("/").pop().replace(/\.[^.]+$/, "")}-${Date.now().toString(36)}.jpg`;
+        cx.spawn(async (cx) => {
+          try {
+            await exec("sh", ["-c", 'mkdir -p "$(dirname "$1")" && sips -s format jpeg -s formatOptions 85 -Z 2400 "$0" --out "$1" >/dev/null', p, dst], { timeout: 60000 });
+            chip.path = dst;
+            this.attachImage(chip, cx);
+          } catch (e) {
+            const i = this.composer.chips.indexOf(chip);
+            if (i >= 0) this.composer.removeChip(i);
+            this.flash(`Не открыл ${p.split("/").pop()}: ${message(e)}`, cx);
+          }
+          cx.notify();
+        });
+        continue;
+      }
       const rel = this.cwd && p.startsWith(this.cwd + "/") ? p.slice(this.cwd.length + 1) : p;
       text += (text && !/\s$/.test(text) ? " " : "") + `@${rel} `;
     }
