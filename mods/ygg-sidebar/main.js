@@ -157,15 +157,17 @@ export default class YggSidebar extends View {
   }
 
   scanExternal(cx) {
-    if (this.scanning) return;
-    this.scanning = true;
-    const ms = [...new Set([...spaces(), ...Object.values(this.known)].map((x) => x.machine).filter(Boolean))]
-      .filter((m) => machines().find((x) => x.name === m)?.layout === "ready");
+    // Скан, оборванный перезагрузкой мода, не держит замок дольше своего таймаута.
+    if (this.scanning && Date.now() - this.scanning < 90000) return;
+    this.scanning = Date.now();
+    // Сессии сервера читаются через hc exec и без открытой в Herdr раскладки машины: пока Herdr переподключается
+    // к ней, её сессии не пропадают и новые видны.
+    const ms = [...new Set([...spaces(), ...Object.values(this.known)].map((x) => x.machine).filter(Boolean))];
     cx.spawn(async (cx) => {
       try {
         const r = await exec("sh", ["-c", RUN, EXTERNAL(), ...ms], { timeout: 60000 });
         const d = JSON.parse(r.stdout || "null");
-        if (d) { this.opening?.clear(); const old = shared("ygg.ext"); for (const m of ms) if (!d.machines[m] && old?.machines?.[m]) d.machines[m] = old.machines[m]; setShared("ygg.ext", d); cx.notify(); }
+        if (d) { this.opening?.clear(); const old = shared("ygg.ext"); for (const m of ms) if (!d.machines[m]?.items && old?.machines?.[m]) d.machines[m] = old.machines[m]; setShared("ygg.ext", d); cx.notify(); }
       } catch {}
       this.scanning = false;
     });
